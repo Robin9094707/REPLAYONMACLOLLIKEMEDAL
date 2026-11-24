@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: Int, CaseIterable {
-    case general, recording, hotkeys, games, windows, storage, clips
+    case general, recording, hotkeys, games, windows, keyboard, system, storage, clips
 
     var title: String {
         switch self {
@@ -11,6 +11,8 @@ enum SettingsTab: Int, CaseIterable {
         case .hotkeys: return "Tastenkürzel"
         case .games: return "Spiele"
         case .windows: return "Fenster"
+        case .keyboard: return "Tastatur"
+        case .system: return "System"
         case .storage: return "Speicher"
         case .clips: return "Clips"
         }
@@ -23,6 +25,8 @@ enum SettingsTab: Int, CaseIterable {
         case .hotkeys: return "keyboard"
         case .games: return "gamecontroller"
         case .windows: return "macwindow.on.rectangle"
+        case .keyboard: return "command"
+        case .system: return "cpu"
         case .storage: return "externaldrive"
         case .clips: return "film.stack"
         }
@@ -37,6 +41,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
     private var settingsWindow: NSWindow?
     private var settingsTabs: NSTabViewController?
     private var onboardingWindow: NSWindow?
+    private var taskManagerWindow: NSWindow?
+    private var cleanerWindow: NSWindow?
 
     private func inject<V: View>(_ view: V) -> some View {
         let state = AppState.shared
@@ -55,7 +61,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
             for item in SettingsTab.allCases {
                 let controller = NSHostingController(rootView: AnyView(inject(settingsView(for: item))))
                 controller.sizingOptions = []
-                controller.preferredContentSize = NSSize(width: 680, height: 560)
+                controller.preferredContentSize = NSSize(width: 780, height: 580)
                 let tabItem = NSTabViewItem(viewController: controller)
                 tabItem.label = item.title
                 tabItem.image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: item.title)
@@ -64,8 +70,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
             let window = NSWindow(contentViewController: tabs)
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.toolbarStyle = .preference
-            window.title = "Simplex Recorder"
-            window.setContentSize(NSSize(width: 680, height: 560))
+            window.title = "Simplex Suite"
+            window.setContentSize(NSSize(width: 780, height: 580))
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()
@@ -93,6 +99,36 @@ final class WindowManager: NSObject, NSWindowDelegate {
         present(onboardingWindow)
     }
 
+    func showTaskManager() {
+        if taskManagerWindow == nil {
+            taskManagerWindow = makeToolWindow(title: "Taskmanager", view: AnyView(TaskManagerView()),
+                                               size: NSSize(width: 820, height: 600), autosave: "SimplexTaskManager")
+        }
+        present(taskManagerWindow)
+    }
+
+    func showCleaner() {
+        if cleanerWindow == nil {
+            cleanerWindow = makeToolWindow(title: "Aufräumen & Deinstallieren", view: AnyView(CleanerView()),
+                                           size: NSSize(width: 900, height: 640), autosave: "SimplexCleaner")
+        }
+        present(cleanerWindow)
+    }
+
+    private func makeToolWindow(title: String, view: AnyView, size: NSSize, autosave: String) -> NSWindow {
+        let controller = NSHostingController(rootView: AnyView(inject(view)))
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = false
+        window.title = title
+        window.setContentSize(size)
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        window.setFrameAutosaveName(autosave)
+        return window
+    }
+
     func closeOnboarding() {
         onboardingWindow?.close()
     }
@@ -112,6 +148,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
         case .hotkeys: HotKeySettingsView()
         case .games: GamesSettingsView()
         case .windows: WindowSettingsView()
+        case .keyboard: KeyboardSettingsView()
+        case .system: SystemSettingsView()
         case .storage: StorageSettingsView()
         case .clips: ClipsView()
         }
@@ -120,7 +158,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(150))
-            let visible = NSApp.windows.contains { $0.isVisible && ($0 === self.settingsWindow || $0 === self.onboardingWindow) }
+            let ours = [self.settingsWindow, self.onboardingWindow, self.taskManagerWindow, self.cleanerWindow]
+            let visible = ours.contains { $0?.isVisible == true }
             if !visible { NSApp.setActivationPolicy(.accessory) }
         }
     }

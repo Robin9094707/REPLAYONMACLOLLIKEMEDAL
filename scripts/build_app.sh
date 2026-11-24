@@ -4,7 +4,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="Simplex Recorder"
+APP_NAME="Simplex Suite"
 EXEC_NAME="SimplexRecorder"
 VERSION="${VERSION:-1.0.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
@@ -49,13 +49,13 @@ codesign --verify --verbose "$APP"
 lipo -info "$APP/Contents/MacOS/$EXEC_NAME" || true
 
 echo "▶︎ Packaging"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$DIST/SimplexRecorder-$VERSION.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$DIST/SimplexSuite-$VERSION.zip"
 
 DMG_ROOT="$DIST/dmg"
 mkdir -p "$DMG_ROOT"
 cp -R "$APP" "$DMG_ROOT/"
 ln -s /Applications "$DMG_ROOT/Programme"
-hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DIST/SimplexRecorder-$VERSION.dmg"
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DIST/SimplexSuite-$VERSION.dmg"
 rm -rf "$DMG_ROOT" "$DIST/icon_1024.png"
 
 echo "✅ Done:"

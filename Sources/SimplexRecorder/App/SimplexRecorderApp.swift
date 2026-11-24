@@ -8,16 +8,16 @@ struct SimplexRecorderApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContentView()
+            DashboardView()
                 .environmentObject(state)
                 .environmentObject(state.settings)
                 .environmentObject(state.library)
                 .environmentObject(state.storage)
                 .environmentObject(state.detector)
         } label: {
-            MenuBarLabel(state: state, settings: state.settings)
+            MenuBarLabel(state: state, settings: state.settings, suite: SuiteSettings.shared, monitor: SystemMonitor.shared)
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -67,7 +67,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if !others.isEmpty {
+        // An older copy at a different path (e.g. "Simplex Recorder.app" before the rename)
+        // is replaced: the launch agent handover below boots it out.
+        let myBundle = Bundle.main.bundleURL.standardizedFileURL
+        let olderCopies = others.filter { $0.bundleURL?.standardizedFileURL != myBundle }
+        if !olderCopies.isEmpty {
+            DiagnosticsLog.write("replacing older copy at \(olderCopies.compactMap { $0.bundleURL?.path })")
+            if !settings.wantsLaunchAgent || LaunchAgentManager.shouldSkipHandover {
+                olderCopies.forEach { $0.terminate() }
+            }
+        }
+        let sameCopies = others.filter { $0.bundleURL?.standardizedFileURL == myBundle }
+        if !sameCopies.isEmpty {
             // Already running → just bring up its settings window.
             DistributedNotificationCenter.default().postNotificationName(
                 Self.showSettingsNotification, object: nil, userInfo: nil, deliverImmediately: true)
@@ -98,17 +109,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MenuBarLabel: View {
     @ObservedObject var state: AppState
     @ObservedObject var settings: AppSettings
+    @ObservedObject var suite: SuiteSettings
+    @ObservedObject var monitor: SystemMonitor
 
     var body: some View {
-        if settings.menuBarShowsTimer && state.isRecording {
-            HStack(spacing: 3) {
-                Image(systemName: state.menuBarSymbol)
-                Text("\(Int(state.bufferedSeconds))s").monospacedDigit()
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+            if !statsText.isEmpty {
+                Text(statsText).monospacedDigit()
             }
-            .accessibilityLabel("Simplex Recorder")
-        } else {
-            Image(systemName: state.menuBarSymbol)
-                .accessibilityLabel("Simplex Recorder")
         }
+        .accessibilityLabel("Simplex Suite")
+    }
+
+    /// Tool icon; while clipping a filled variant (the dot shows the recording state).
+    private var symbol: String {
+        if state.isSaving { return "arrow.down.circle.fill" }
+        switch state.status {
+        case .recording: return "wrench.and.screwdriver.fill"
+        case .needsPermission, .error: return "exclamationmark.triangle"
+        default: return "wrench.and.screwdriver"
+        }
+    }
+
+    private var statsText: String {
+        var parts: [String] = []
+        if state.isRecording {
+            parts.append(settings.menuBarShowsTimer ? "● \(Int(state.bufferedSeconds))s" : "●")
+        }
+        if suite.statsInMenuBar {
+            let s = monitor.snapshot
+            if suite.menuBarShowCPU { parts.append("\(Int(s.cpuUsage * 100))%") }
+            if suite.menuBarShowTemp, let t = s.cpuTemperature { parts.append("\(Int(t.rounded()))°") }
+            if suite.menuBarShowRAM { parts.append(Int64(s.memoryUsed).compactBytes) }
+        }
+        return parts.joined(separator: " ")
     }
 }

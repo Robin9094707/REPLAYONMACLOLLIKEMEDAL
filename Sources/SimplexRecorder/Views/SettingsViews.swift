@@ -49,7 +49,7 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Start & Hintergrund")
             } footer: {
-                Text("Die App läuft unauffällig in der Menüleiste und nimmt nur auf, solange ein Spiel läuft. Egal ob ⌘Q, „Sofort beenden“ oder Absturz – sie kommt nach wenigen Sekunden zurück. Nur „Simplex Recorder beenden“ im eigenen Menü stoppt sie bis zur nächsten Anmeldung.")
+                Text("Die App läuft unauffällig in der Menüleiste und nimmt nur auf, solange ein Spiel läuft. Egal ob ⌘Q, „Sofort beenden“ oder Absturz – sie kommt nach wenigen Sekunden zurück. Nur „Simplex Suite beenden“ im eigenen Menü stoppt sie bis zur nächsten Anmeldung.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -339,7 +339,7 @@ struct GamesSettingsView: View {
             } header: {
                 Text("Laufende Programme")
             } footer: {
-                Text("Auto = Simplex Recorder entscheidet selbst · Aufnehmen = immer als Spiel behandeln · Nie = niemals aufnehmen. Geht auch direkt über das Menüleisten-Symbol.")
+                Text("Auto = Simplex Suite entscheidet selbst · Aufnehmen = immer als Spiel behandeln · Nie = niemals aufnehmen. Geht auch direkt über das Menüleisten-Symbol.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -516,7 +516,7 @@ struct WindowSettingsView: View {
 
             Section("Berechtigung") {
                 PermissionRow(title: "Bedienungshilfen",
-                              detail: "Nötig, damit Simplex Recorder Spielfenster verschieben und vergrößern darf.",
+                              detail: "Nötig, damit Simplex Suite Spielfenster verschieben und vergrößern darf.",
                               granted: trusted,
                               actionTitle: "Erlauben …") {
                     GameWindowAssistant.requestTrust()
@@ -646,7 +646,7 @@ struct StorageSettingsView: View {
                         Menu("Externe Festplatte") {
                             ForEach(externalVolumes, id: \.self) { volume in
                                 Button(volume.lastPathComponent) {
-                                    settings.saveFolderPath = volume.appendingPathComponent("Simplex Recorder").path
+                                    settings.saveFolderPath = volume.appendingPathComponent("Simplex Suite").path
                                 }
                             }
                         }
@@ -704,7 +704,7 @@ struct StorageSettingsView: View {
             } header: {
                 Text("Automatisch aufräumen")
             } footer: {
-                Text("Wird die Grenze überschritten, löscht Simplex Recorder die ältesten Clips endgültig.")
+                Text("Wird die Grenze überschritten, löscht Simplex Suite die ältesten Clips endgültig.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

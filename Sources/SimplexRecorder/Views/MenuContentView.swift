@@ -122,7 +122,7 @@ struct MenuContentView: View {
 
         Button("Einstellungen …") { WindowManager.shared.showSettings() }
             .keyboardShortcut(",")
-        Button("Simplex Recorder beenden") { state.confirmQuit() }
+        Button("Simplex Suite beenden") { state.confirmQuit() }
             .keyboardShortcut("q")
     }
 }

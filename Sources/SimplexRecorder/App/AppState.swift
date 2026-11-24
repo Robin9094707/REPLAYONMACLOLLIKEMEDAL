@@ -92,6 +92,7 @@ final class AppState: ObservableObject {
         lastFolderPath = settings.saveFolderPath
         refreshLibrary()
         scheduleReevaluate()
+        SuiteCoordinator.shared.start()
     }
 
     /// After an update the old privacy entry belongs to the previous (differently signed)
@@ -114,7 +115,7 @@ final class AppState: ObservableObject {
             if settings.showNotifications {
                 NotificationManager.shared.notify(
                     title: "Bitte Bildschirmaufnahme erneut erlauben",
-                    body: "Nach einem Update fragt macOS einmal neu. Simplex Recorder startet die Aufnahme automatisch, sobald du zustimmst.")
+                    body: "Nach einem Update fragt macOS einmal neu. Simplex Suite startet die Aufnahme automatisch, sobald du zustimmst.")
             }
         }
     }
@@ -550,7 +551,7 @@ final class AppState: ObservableObject {
     func confirmQuit() {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Simplex Recorder beenden?"
+        alert.messageText = "Simplex Suite beenden?"
         alert.informativeText = "Die App bleibt bis zur nächsten Anmeldung aus und nimmt solange keine Clips auf. Du kannst die Aufnahme stattdessen auch nur pausieren."
         alert.addButton(withTitle: "Beenden")
         alert.addButton(withTitle: "Nur pausieren")

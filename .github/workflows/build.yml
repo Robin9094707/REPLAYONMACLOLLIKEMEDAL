@@ -38,7 +38,7 @@ jobs:
       - name: Artefakt hochladen
         uses: actions/upload-artifact@v4
         with:
-          name: SimplexRecorder-${{ env.VERSION }}
+          name: SimplexSuite-${{ env.VERSION }}
           path: |
             dist/*.dmg
             dist/*.zip

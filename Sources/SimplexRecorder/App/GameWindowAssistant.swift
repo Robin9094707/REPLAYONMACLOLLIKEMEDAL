@@ -27,16 +27,20 @@ final class GameWindowAssistant {
     }
 
     private var timer: Timer?
+    private var mouseMonitor: Any?
     private var tracking = false
     private var draggingWindow = false
     private var startMouse: NSPoint = .zero
     private var startBounds: CGRect = .zero
+    private var trackedPID: pid_t = 0
+    private var trackedWindowID: UInt32 = 0
     private var currentZone: Zone?
     private var currentScreen: NSScreen?
     private var savedFrames: [pid_t: CGRect] = [:]
     private let preview = SnapPreview()
 
     private var settings: AppSettings { AppSettings.shared }
+    private var scope: WindowAssistScope { SuiteSettings.shared.windowAssistScope }
     private var game: DetectedGame? { AppState.shared.detector.currentGame }
 
     // MARK: Permission
@@ -67,23 +71,45 @@ final class GameWindowAssistant {
 
     // MARK: Lifecycle
 
-    /// Called whenever the detected game changes. The poll timer only runs while a game is detected.
+    /// Installs a single global mouse-down monitor while the assistant is active. Polling
+    /// only happens while the mouse button is actually held down on a window.
     func update() {
-        let shouldRun = settings.snapAssistEnabled && game != nil && Self.isTrusted
-        if shouldRun, timer == nil {
-            let t = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.tick() }
+        let shouldRun = settings.snapAssistEnabled && Self.isTrusted && (scope == .allApps || game != nil)
+        if shouldRun, mouseMonitor == nil {
+            mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { _ in
+                let location = NSEvent.mouseLocation
+                Task { @MainActor in GameWindowAssistant.shared.mouseDown(at: location) }
             }
-            t.tolerance = 0.01
-            timer = t
-        } else if !shouldRun, let t = timer {
-            t.invalidate()
-            timer = nil
-            reset()
+        } else if !shouldRun, let monitor = mouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseMonitor = nil
+            stopTracking()
         }
     }
 
-    private func reset() {
+    private func mouseDown(at location: NSPoint) {
+        guard !tracking else { return }
+        let cgPoint = CGPoint(x: location.x, y: Self.primaryHeight - location.y)
+        guard let hit = Self.windowUnder(cgPoint) else { return }
+        if scope == .games {
+            guard let game, hit.pid == game.pid else { return }
+        }
+        tracking = true
+        draggingWindow = false
+        trackedPID = hit.pid
+        trackedWindowID = hit.windowID
+        startMouse = location
+        startBounds = hit.bounds
+        let t = Timer.scheduledTimer(withTimeInterval: 1.0 / 40.0, repeats: true) { _ in
+            Task { @MainActor in GameWindowAssistant.shared.tick() }
+        }
+        t.tolerance = 0.005
+        timer = t
+    }
+
+    private func stopTracking() {
+        timer?.invalidate()
+        timer = nil
         tracking = false
         draggingWindow = false
         currentZone = nil
@@ -93,48 +119,32 @@ final class GameWindowAssistant {
     // MARK: Drag tracking
 
     private func tick() {
-        guard let game, game.windowID != 0,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == game.pid else {
-            if tracking { reset() }
-            return
-        }
+        guard tracking else { return stopTracking() }
         let buttonDown = NSEvent.pressedMouseButtons & 1 == 1
         let mouse = NSEvent.mouseLocation
 
-        if buttonDown && !tracking {
-            tracking = true
-            draggingWindow = false
-            startMouse = mouse
-            startBounds = Self.windowBounds(game.windowID) ?? .zero
-            return
-        }
-        guard tracking else { return }
-
         if !buttonDown {
-            // Released.
             if draggingWindow, let zone = currentZone, let screen = currentScreen {
-                preview.hide()
-                let pid = game.pid
+                let pid = trackedPID, windowID = trackedWindowID
                 // Let the window server finish the drag before we resize.
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(60))
-                    self.apply(zone, pid: pid, screen: screen, animatedFeedback: true)
+                    self.apply(zone, pid: pid, windowID: windowID, screen: screen, animatedFeedback: true)
                 }
-            } else {
-                preview.hide()
             }
-            tracking = false
-            draggingWindow = false
-            currentZone = nil
+            stopTracking()
             return
         }
 
-        // Button held: is the *window* moving (title bar drag), not just the mouse in-game?
+        // Button held: is the *window* moving (title bar drag), not just the mouse?
         if !draggingWindow {
-            guard hypot(mouse.x - startMouse.x, mouse.y - startMouse.y) > 4,
-                  let bounds = Self.windowBounds(game.windowID) else { return }
+            guard hypot(mouse.x - startMouse.x, mouse.y - startMouse.y) > 4 else { return }
+            guard let bounds = Self.windowBounds(trackedWindowID) else { return stopTracking() }
             if abs(bounds.origin.x - startBounds.origin.x) > 2 || abs(bounds.origin.y - startBounds.origin.y) > 2 {
                 draggingWindow = true
+            } else if hypot(mouse.x - startMouse.x, mouse.y - startMouse.y) > 40 {
+                // Mouse moved a lot but the window didn't → not a window drag (e.g. selecting text).
+                return stopTracking()
             } else {
                 return
             }
@@ -152,6 +162,35 @@ final class GameWindowAssistant {
                 preview.hide()
             }
         }
+    }
+
+    /// Topmost normal window under a point (CG coordinates).
+    private static func windowUnder(_ point: CGPoint) -> (pid: pid_t, windowID: UInt32, bounds: CGRect)? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
+        let me = ProcessInfo.processInfo.processIdentifier
+        for window in list {
+            guard let layer = window[kCGWindowLayer as String] as? Int else { continue }
+            guard let dict = window[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict as CFDictionary),
+                  bounds.contains(point) else { continue }
+            // Something above normal windows (menu bar, Dock, panels) is under the cursor.
+            guard layer == 0 else { return nil }
+            guard let pid = window[kCGWindowOwnerPID as String] as? Int, pid_t(pid) != me else { return nil }
+            let number = (window[kCGWindowNumber as String] as? Int) ?? 0
+            return (pid_t(pid), UInt32(truncatingIfNeeded: number), bounds)
+        }
+        return nil
+    }
+
+    /// Frontmost normal window of an app (CG window list is ordered front to back).
+    private static func frontWindow(of pid: pid_t) -> UInt32 {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return 0 }
+        for window in list {
+            guard (window[kCGWindowOwnerPID as String] as? Int).map({ pid_t($0) }) == pid,
+                  (window[kCGWindowLayer as String] as? Int) == 0 else { continue }
+            return UInt32(truncatingIfNeeded: (window[kCGWindowNumber as String] as? Int) ?? 0)
+        }
+        return 0
     }
 
     private static func zone(for mouse: NSPoint, on screen: NSScreen) -> Zone? {
@@ -180,38 +219,50 @@ final class GameWindowAssistant {
 
     // MARK: Actions (menu / hotkey)
 
-    func perform(_ zone: Zone) {
-        guard let game else { return beepNoGame() }
-        guard Self.isTrusted else { return askForTrust() }
-        let screen = screenForGame(game) ?? NSScreen.main
-        guard let screen else { return }
-        apply(zone, pid: game.pid, screen: screen, animatedFeedback: true)
+    /// Which window an action applies to: the game, or – in "all apps" mode – the
+    /// frontmost window of the frontmost app.
+    private func actionTarget() -> (pid: pid_t, windowID: UInt32, name: String)? {
+        let front = NSWorkspace.shared.frontmostApplication
+        if let game, scope == .games || front?.processIdentifier == game.pid {
+            return (game.pid, game.windowID, game.name)
+        }
+        guard scope == .allApps, let front, front.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+        return (front.processIdentifier, Self.frontWindow(of: front.processIdentifier), front.localizedName ?? "Fenster")
     }
 
-    /// ⌥⇧F: fill the screen, or restore the previous size if it already fills it.
-    func toggleMaximize() {
-        guard let game else { return beepNoGame() }
+    func perform(_ zone: Zone) {
+        guard let target = actionTarget() else { return beepNoGame() }
         guard Self.isTrusted else { return askForTrust() }
-        guard let screen = screenForGame(game) ?? NSScreen.main else { return }
-        let target = Self.cocoaToCG(Self.targetFrame(.maximize, on: screen))
-        if let bounds = Self.windowBounds(game.windowID), Self.roughlyEqual(bounds, target), savedFrames[game.pid] != nil {
+        let screen = screen(for: target.windowID) ?? NSScreen.main
+        guard let screen else { return }
+        apply(zone, pid: target.pid, windowID: target.windowID, screen: screen, animatedFeedback: true)
+    }
+
+    /// Hotkey: fill the screen, or restore the previous size if it already fills it.
+    func toggleMaximize() {
+        guard let target = actionTarget() else { return beepNoGame() }
+        guard Self.isTrusted else { return askForTrust() }
+        guard let screen = screen(for: target.windowID) ?? NSScreen.main else { return }
+        let full = Self.cocoaToCG(Self.targetFrame(.maximize, on: screen))
+        if let bounds = Self.windowBounds(target.windowID), Self.roughlyEqual(bounds, full), savedFrames[target.pid] != nil {
             restore()
         } else {
-            apply(.maximize, pid: game.pid, screen: screen, animatedFeedback: true)
+            apply(.maximize, pid: target.pid, windowID: target.windowID, screen: screen, animatedFeedback: true)
         }
     }
 
     func restore() {
-        guard let game else { return beepNoGame() }
+        guard let target = actionTarget() else { return beepNoGame() }
         guard Self.isTrusted else { return askForTrust() }
-        guard let frame = savedFrames[game.pid], let window = Self.axWindow(pid: game.pid, matching: game.windowID) else {
+        guard let frame = savedFrames[target.pid],
+              let window = Self.axWindow(pid: target.pid, matching: target.windowID) else {
             NSSound.beep()
             return
         }
         Self.setFrame(window, cgFrame: frame)
-        savedFrames[game.pid] = nil
+        savedFrames[target.pid] = nil
         OverlayHUD.shared.show(symbol: "arrow.down.right.and.arrow.up.left", title: "Fenstergröße wiederhergestellt",
-                               subtitle: game.name, tint: .systemBlue)
+                               subtitle: target.name, tint: .systemBlue)
     }
 
     /// Called once when a game starts (if enabled in settings).
@@ -220,36 +271,36 @@ final class GameWindowAssistant {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1.5)) // give the game time to create its window
             guard let current = self.game, current.pid == game.pid,
-                  let screen = self.screenForGame(current) ?? NSScreen.main else { return }
+                  let screen = self.screen(for: current.windowID) ?? NSScreen.main else { return }
             // Leave real fullscreen alone.
             if let bounds = Self.windowBounds(current.windowID),
                Self.roughlyEqual(bounds, Self.cocoaToCG(screen.frame)) { return }
-            self.apply(.maximize, pid: current.pid, screen: screen, animatedFeedback: false)
+            self.apply(.maximize, pid: current.pid, windowID: current.windowID, screen: screen, animatedFeedback: false)
         }
     }
 
-    private func apply(_ zone: Zone, pid: pid_t, screen: NSScreen, animatedFeedback: Bool) {
-        let windowID = game?.pid == pid ? (game?.windowID ?? 0) : 0
+    private func apply(_ zone: Zone, pid: pid_t, windowID: UInt32, screen: NSScreen, animatedFeedback: Bool) {
         guard let window = Self.axWindow(pid: pid, matching: windowID) else {
             DiagnosticsLog.write("snap: no accessible window for pid \(pid)")
             NSSound.beep()
             return
         }
-        if let current = Self.frame(of: window), savedFrames[pid] == nil || zone != .maximize {
-            let target = Self.cocoaToCG(Self.targetFrame(.maximize, on: screen))
-            if !Self.roughlyEqual(current, target) { savedFrames[pid] = current }
+        if let current = Self.frame(of: window) {
+            let full = Self.cocoaToCG(Self.targetFrame(.maximize, on: screen))
+            if !Self.roughlyEqual(current, full) && savedFrames[pid] == nil { savedFrames[pid] = current }
         }
         let target = Self.cocoaToCG(Self.targetFrame(zone, on: screen))
         Self.setFrame(window, cgFrame: target)
         DiagnosticsLog.write("snap: \(zone) → \(target)")
         if animatedFeedback {
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName
             OverlayHUD.shared.show(symbol: zone == .maximize ? "arrow.up.left.and.arrow.down.right" : "rectangle.split.2x1",
-                                   title: zone.title, subtitle: game?.name, tint: .systemBlue)
+                                   title: zone.title, subtitle: name, tint: .systemBlue)
         }
     }
 
-    private func screenForGame(_ game: DetectedGame) -> NSScreen? {
-        guard let bounds = Self.windowBounds(game.windowID) else { return nil }
+    private func screen(for windowID: UInt32) -> NSScreen? {
+        guard let bounds = Self.windowBounds(windowID) else { return nil }
         let center = Self.cgToCocoa(bounds)
         let mid = NSPoint(x: center.midX, y: center.midY)
         return NSScreen.screens.first { NSMouseInRect(mid, $0.frame, false) }
@@ -257,8 +308,8 @@ final class GameWindowAssistant {
 
     private func beepNoGame() {
         NSSound.beep()
-        OverlayHUD.shared.show(symbol: "gamecontroller", title: "Kein Spiel erkannt",
-                               subtitle: "Starte zuerst ein Spiel", tint: .systemGray)
+        OverlayHUD.shared.show(symbol: "macwindow", title: scope == .games ? "Kein Spiel erkannt" : "Kein Fenster gefunden",
+                               subtitle: scope == .games ? "Starte zuerst ein Spiel" : "Klicke zuerst in ein Fenster", tint: .systemGray)
     }
 
     private func askForTrust() {
@@ -277,7 +328,7 @@ final class GameWindowAssistant {
         return CGRect(dictionaryRepresentation: dict as CFDictionary)
     }
 
-    private static var primaryHeight: CGFloat {
+    static var primaryHeight: CGFloat {
         NSScreen.screens.first?.frame.height ?? 0
     }
 

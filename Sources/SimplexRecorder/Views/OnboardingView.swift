@@ -63,7 +63,7 @@ struct OnboardingView: View {
     private var welcome: some View {
         VStack(spacing: 18) {
             AppBadge(size: 96)
-            Text("Willkommen bei Simplex Recorder").font(.largeTitle.weight(.bold))
+            Text("Willkommen bei Simplex Suite").font(.largeTitle.weight(.bold))
             Text("Dein Replay-Recorder für den Mac – wie Medal, nur nativ.")
                 .font(.title3).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 12) {
@@ -83,7 +83,7 @@ struct OnboardingView: View {
                 .font(.system(size: 60))
                 .foregroundStyle(screenGranted ? Color.green : Color.accentColor)
             Text("Bildschirmaufnahme erlauben").font(.title.weight(.bold))
-            Text("macOS fragt einmal nach deiner Erlaubnis. Aktiviere „Simplex Recorder“ unter Systemeinstellungen › Datenschutz & Sicherheit › Bildschirm- & Systemaudioaufnahme.")
+            Text("macOS fragt einmal nach deiner Erlaubnis. Aktiviere „Simplex Suite“ unter Systemeinstellungen › Datenschutz & Sicherheit › Bildschirm- & Systemaudioaufnahme.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             if screenGranted {
@@ -139,7 +139,7 @@ struct OnboardingView: View {
                 Text("Externe Festplatten").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
                 ForEach(externalVolumes, id: \.self) { volume in
                     Button {
-                        settings.saveFolderPath = volume.appendingPathComponent("Simplex Recorder").path
+                        settings.saveFolderPath = volume.appendingPathComponent("Simplex Suite").path
                     } label: {
                         HStack {
                             Image(nsImage: NSWorkspace.shared.icon(forFile: volume.path))
@@ -173,7 +173,7 @@ struct OnboardingView: View {
         VStack(spacing: 18) {
             Image(systemName: "infinity.circle.fill").font(.system(size: 56)).foregroundStyle(Color.accentColor)
             Text("Immer bereit im Hintergrund").font(.title.weight(.bold))
-            Text("Simplex Recorder sitzt in der Menüleiste und wird erst aktiv, wenn ein Spiel läuft.")
+            Text("Simplex Suite sitzt in der Menüleiste und wird erst aktiv, wenn ein Spiel läuft.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Beim Anmelden automatisch starten", isOn: $settings.launchAtLogin)
