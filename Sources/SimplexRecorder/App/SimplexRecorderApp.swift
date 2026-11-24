@@ -13,6 +13,7 @@ struct SimplexRecorderApp: App {
                 .environmentObject(state.settings)
                 .environmentObject(state.library)
                 .environmentObject(state.storage)
+                .environmentObject(state.detector)
         } label: {
             MenuBarLabel(state: state, settings: state.settings)
         }

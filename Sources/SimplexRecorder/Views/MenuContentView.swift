@@ -7,6 +7,7 @@ struct MenuContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var library: ClipLibrary
     @EnvironmentObject private var storage: StorageMonitor
+    @EnvironmentObject private var detector: GameDetector
 
     var body: some View {
         Text(state.statusLine)
@@ -37,6 +38,41 @@ struct MenuContentView: View {
         Picker("Clip-Länge", selection: $settings.replayDuration) {
             ForEach(AppSettings.durationOptions, id: \.self) { seconds in
                 Text(durationLabel(seconds)).tag(seconds)
+            }
+        }
+
+        if let game = detector.currentGame {
+            Menu("Spielfenster – \(game.name)") {
+                Button("Bildschirm füllen (Menüleiste & Dock bleiben)   \(settings.maximizeHotKey.displayString)") {
+                    GameWindowAssistant.shared.perform(.maximize)
+                }
+                Button("Linke Hälfte") { GameWindowAssistant.shared.perform(.leftHalf) }
+                Button("Rechte Hälfte") { GameWindowAssistant.shared.perform(.rightHalf) }
+                Button("Zentriert (80 %)") { GameWindowAssistant.shared.perform(.center) }
+                Divider()
+                Button("Ursprüngliche Größe") { GameWindowAssistant.shared.restore() }
+                if !GameWindowAssistant.isTrusted {
+                    Divider()
+                    Button("Bedienungshilfen erlauben …") { GameWindowAssistant.requestTrust() }
+                }
+            }
+        }
+
+        if let app = detector.frontmostApp {
+            Divider()
+            if app.isGame {
+                Button("„\(app.name)“ nicht mehr aufnehmen") {
+                    state.setRule(key: app.ruleKey, name: app.name, include: false)
+                }
+            } else {
+                Button("„\(app.name)“ als Spiel aufnehmen") {
+                    state.setRule(key: app.ruleKey, name: app.name, include: true)
+                }
+            }
+            if settings.rule(for: app.ruleKey) != nil {
+                Button("Regel für „\(app.name)“ zurücksetzen") {
+                    state.setRule(key: app.ruleKey, name: app.name, include: nil)
+                }
             }
         }
 

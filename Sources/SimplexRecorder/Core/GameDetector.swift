@@ -29,6 +29,8 @@ struct RunningAppInfo: Identifiable {
 final class GameDetector: ObservableObject {
     @Published private(set) var currentGame: DetectedGame?
     @Published private(set) var runningApps: [RunningAppInfo] = []
+    /// The app the user was last working in (never this app) – for quick include/exclude.
+    @Published private(set) var frontmostApp: RunningAppInfo?
 
     private let settings: AppSettings
     private var timer: Timer?
@@ -138,6 +140,13 @@ final class GameDetector: ObservableObject {
         }
 
         let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if let frontApp = NSWorkspace.shared.frontmostApplication, frontApp.processIdentifier != me,
+           frontApp.activationPolicy == .regular {
+            let info = apps.first { $0.pid == frontApp.processIdentifier }
+            if info?.pid != frontmostApp?.pid || info?.detection != frontmostApp?.detection {
+                frontmostApp = info
+            }
+        }
         let chosen = games.first(where: { $0.pid == front })
             ?? games.first(where: { $0.pid == currentGame?.pid })
             ?? games.max(by: { $0.windowSize.width * $0.windowSize.height < $1.windowSize.width * $1.windowSize.height })

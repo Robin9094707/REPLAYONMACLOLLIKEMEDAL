@@ -80,6 +80,10 @@ struct KeyCombo: Codable, Equatable {
         keyCode: UInt32(kVK_ANSI_X),
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
         keyLabel: "X")
+    static let defaultMaximize = KeyCombo(
+        keyCode: UInt32(kVK_ANSI_F),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
+        keyLabel: "F")
     static let defaultPause = KeyCombo(
         keyCode: UInt32(kVK_ANSI_P),
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
@@ -182,6 +186,10 @@ final class AppSettings: ObservableObject {
         static let revealAfterSave = "revealAfterSave"
         static let menuBarTimer = "menuBarShowsTimer"
         static let settingsVersion = "settingsVersion"
+        static let snapAssist = "snapAssistEnabled"
+        static let autoMaximize = "autoMaximizeGames"
+        static let startAnimation = "showStartAnimation"
+        static let maximizeHotKey = "maximizeHotKey"
     }
 
     @Published var replayDuration: Int { didSet { d.set(replayDuration, forKey: K.replayDuration) } }
@@ -223,6 +231,10 @@ final class AppSettings: ObservableObject {
     @Published var copyClipToClipboard: Bool { didSet { d.set(copyClipToClipboard, forKey: K.copyToClipboard) } }
     @Published var revealAfterSave: Bool { didSet { d.set(revealAfterSave, forKey: K.revealAfterSave) } }
     @Published var menuBarShowsTimer: Bool { didSet { d.set(menuBarShowsTimer, forKey: K.menuBarTimer) } }
+    @Published var snapAssistEnabled: Bool { didSet { d.set(snapAssistEnabled, forKey: K.snapAssist) } }
+    @Published var autoMaximizeGames: Bool { didSet { d.set(autoMaximizeGames, forKey: K.autoMaximize) } }
+    @Published var showStartAnimation: Bool { didSet { d.set(showStartAnimation, forKey: K.startAnimation) } }
+    @Published var maximizeHotKey: KeyCombo { didSet { saveCodable(maximizeHotKey, K.maximizeHotKey) } }
 
     private init() {
         let d = UserDefaults.standard
@@ -254,6 +266,9 @@ final class AppSettings: ObservableObject {
             K.copyToClipboard: false,
             K.revealAfterSave: false,
             K.menuBarTimer: false,
+            K.snapAssist: true,
+            K.autoMaximize: false,
+            K.startAnimation: true,
         ])
 
         replayDuration = d.integer(forKey: K.replayDuration)
@@ -291,6 +306,10 @@ final class AppSettings: ObservableObject {
         copyClipToClipboard = d.bool(forKey: K.copyToClipboard)
         revealAfterSave = d.bool(forKey: K.revealAfterSave)
         menuBarShowsTimer = d.bool(forKey: K.menuBarTimer)
+        snapAssistEnabled = d.bool(forKey: K.snapAssist)
+        autoMaximizeGames = d.bool(forKey: K.autoMaximize)
+        showStartAnimation = d.bool(forKey: K.startAnimation)
+        maximizeHotKey = AppSettings.loadCodable(d, K.maximizeHotKey) ?? .defaultMaximize
 
         // Migration: v2 makes "game window only" the default capture mode.
         if d.integer(forKey: K.settingsVersion) < 2 {

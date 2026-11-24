@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: Int, CaseIterable {
-    case general, recording, hotkeys, games, storage, clips
+    case general, recording, hotkeys, games, windows, storage, clips
 
     var title: String {
         switch self {
@@ -10,6 +10,7 @@ enum SettingsTab: Int, CaseIterable {
         case .recording: return "Aufnahme"
         case .hotkeys: return "Tastenkürzel"
         case .games: return "Spiele"
+        case .windows: return "Fenster"
         case .storage: return "Speicher"
         case .clips: return "Clips"
         }
@@ -21,6 +22,7 @@ enum SettingsTab: Int, CaseIterable {
         case .recording: return "record.circle"
         case .hotkeys: return "keyboard"
         case .games: return "gamecontroller"
+        case .windows: return "macwindow.on.rectangle"
         case .storage: return "externaldrive"
         case .clips: return "film.stack"
         }
@@ -109,6 +111,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
         case .recording: RecordingSettingsView()
         case .hotkeys: HotKeySettingsView()
         case .games: GamesSettingsView()
+        case .windows: WindowSettingsView()
         case .storage: StorageSettingsView()
         case .clips: ClipsView()
         }

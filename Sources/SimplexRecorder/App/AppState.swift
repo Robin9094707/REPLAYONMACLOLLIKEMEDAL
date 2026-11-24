@@ -42,6 +42,8 @@ final class AppState: ObservableObject {
     private var registeredLongKey: KeyCombo?
     private var registeredScreenshotKey: KeyCombo?
     private var longKeyActive = false
+    private var registeredMaximizeKey: KeyCombo?
+    private var lastAnnouncedPID: pid_t = 0
     private var lastFolderPath = ""
     private var tickCount = 0
 
@@ -70,7 +72,10 @@ final class AppState: ObservableObject {
 
         detector.$currentGame
             .removeDuplicates()
-            .sink { [weak self] _ in self?.scheduleReevaluate() }
+            .sink { [weak self] _ in
+                self?.scheduleReevaluate()
+                Task { @MainActor in GameWindowAssistant.shared.update() }
+            }
             .store(in: &cancellables)
 
         settings.objectWillChange
@@ -97,6 +102,11 @@ final class AppState: ObservableObject {
         let previous = defaults.string(forKey: "lastLaunchedBuild")
         defaults.set(build, forKey: "lastLaunchedBuild")
         guard let previous, previous != build, settings.hasCompletedOnboarding else { return }
+        // Same story for Accessibility (window assistant), if it was granted before.
+        if defaults.bool(forKey: "accessibilityGrantedBefore"), !GameWindowAssistant.isTrusted {
+            GameWindowAssistant.resetTrust()
+            GameWindowAssistant.requestTrust()
+        }
         Task { @MainActor in
             if await Permissions.probeScreenRecording() { return }
             Permissions.resetScreenRecordingPermission()
@@ -117,6 +127,7 @@ final class AppState: ObservableObject {
     private func settingsChanged() {
         engine.buffer.maxSeconds = Double(settings.bufferSeconds)
         registerHotKeys()
+        GameWindowAssistant.shared.update()
         if settings.saveFolderPath != lastFolderPath {
             lastFolderPath = settings.saveFolderPath
             refreshLibrary()
@@ -126,6 +137,12 @@ final class AppState: ObservableObject {
 
     private func tick() {
         tickCount &+= 1
+        if tickCount % 5 == 0 {
+            GameWindowAssistant.shared.update()
+            if GameWindowAssistant.isTrusted {
+                UserDefaults.standard.set(true, forKey: "accessibilityGrantedBefore")
+            }
+        }
         if tickCount % 60 == 0 { storage.refresh(folder: settings.saveFolderURL) }
         if settings.isPaused, let until = settings.pausedUntil, until <= Date() {
             settings.isPaused = false
@@ -188,6 +205,10 @@ final class AppState: ObservableObject {
             activeSignature = signature
             activeGameName = game?.name ?? "Bildschirm"
             status = .recording(activeGameName ?? "Bildschirm")
+            if let game, game.pid != lastAnnouncedPID {
+                lastAnnouncedPID = game.pid
+                announceStart(game)
+            }
             retryTask?.cancel()
         } catch {
             status = .error(error.localizedDescription)
@@ -262,6 +283,12 @@ final class AppState: ObservableObject {
                 longKeyActive = false
             }
         }
+        if registeredMaximizeKey != settings.maximizeHotKey {
+            registeredMaximizeKey = settings.maximizeHotKey
+            HotKeyCenter.shared.register(id: 5, combo: settings.maximizeHotKey) {
+                Task { @MainActor in GameWindowAssistant.shared.toggleMaximize() }
+            }
+        }
         if registeredScreenshotKey != settings.screenshotHotKey {
             registeredScreenshotKey = settings.screenshotHotKey
             HotKeyCenter.shared.register(id: 4, combo: settings.screenshotHotKey) {
@@ -277,6 +304,7 @@ final class AppState: ObservableObject {
         registeredPauseKey = nil
         registeredLongKey = nil
         registeredScreenshotKey = nil
+        registeredMaximizeKey = nil
         longKeyActive = false
     }
 
@@ -406,6 +434,41 @@ final class AppState: ObservableObject {
         let folder = settings.saveFolderURL
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         NSWorkspace.shared.open(folder)
+    }
+
+    // MARK: Game start
+
+    private func announceStart(_ game: DetectedGame) {
+        DiagnosticsLog.write("game started: \(game.name) (pid \(game.pid))")
+        if settings.showStartAnimation && settings.showOverlay {
+            OverlayHUD.shared.showHero(
+                title: "Clipping aktiv",
+                subtitle: "\(game.name) erkannt – die Aufnahme läuft",
+                detail: "\(settings.clipHotKey.displayString) speichert die letzten \(settings.replayDuration) s · \(settings.maximizeHotKey.displayString) passt das Fenster ein")
+            NSSound(named: NSSound.Name("Purr"))?.play()
+        }
+        GameWindowAssistant.shared.autoMaximizeIfWanted(for: game)
+    }
+
+    // MARK: Include / exclude
+
+    /// include: true = always record, false = never record, nil = automatic.
+    func setRule(key: String, name: String, include: Bool?) {
+        settings.setRule(for: key, include: include)
+        detector.scan()
+        scheduleReevaluate()
+        guard settings.showOverlay else { return }
+        switch include {
+        case .some(true):
+            OverlayHUD.shared.show(symbol: "plus.circle.fill", title: "„\(name)“ wird aufgenommen",
+                                   subtitle: "Als Spiel markiert", tint: .systemGreen)
+        case .some(false):
+            OverlayHUD.shared.show(symbol: "nosign", title: "„\(name)“ ausgeschlossen",
+                                   subtitle: "Wird nie mehr aufgenommen", tint: .systemRed)
+        case .none:
+            OverlayHUD.shared.show(symbol: "arrow.uturn.backward.circle.fill", title: "Regel entfernt",
+                                   subtitle: "„\(name)“ wird wieder automatisch erkannt", tint: .systemGray)
+        }
     }
 
     // MARK: Screenshots

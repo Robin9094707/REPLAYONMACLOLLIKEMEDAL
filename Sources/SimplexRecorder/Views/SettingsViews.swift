@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import UniformTypeIdentifiers
 
 // MARK: - Allgemein
 
@@ -268,6 +269,7 @@ struct HotKeySettingsView: View {
                 }
                 .disabled(!settings.longClipEnabled)
                 LabeledContent("Screenshot") { HotKeyRecorder(combo: $settings.screenshotHotKey) }
+                LabeledContent("Spielfenster einpassen / wiederherstellen") { HotKeyRecorder(combo: $settings.maximizeHotKey) }
                 LabeledContent("Aufnahme pausieren / fortsetzen") { HotKeyRecorder(combo: $settings.pauseHotKey) }
             } header: {
                 Text("Globale Tastenkürzel")
@@ -282,6 +284,7 @@ struct HotKeySettingsView: View {
                     settings.pauseHotKey = .defaultPause
                     settings.longClipHotKey = .defaultLongClip
                     settings.screenshotHotKey = .defaultScreenshot
+                    settings.maximizeHotKey = .defaultMaximize
                     AppState.shared.registerHotKeys()
                 }
             } footer: {
@@ -298,80 +301,285 @@ struct HotKeySettingsView: View {
 struct GamesSettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var detector: GameDetector
+    @State private var search = ""
+
+    private var filteredApps: [RunningAppInfo] {
+        detector.runningApps.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+    }
 
     var body: some View {
         Form {
             Section {
-                if let game = detector.currentGame {
-                    Label("Erkannt: \(game.name)", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(.green)
-                } else {
-                    Label("Gerade läuft kein erkanntes Spiel", systemImage: "moon.zzz")
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Image(systemName: detector.currentGame == nil ? "moon.zzz.fill" : "gamecontroller.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(detector.currentGame == nil ? Color.secondary : Color.green)
+                        .frame(width: 34)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(detector.currentGame.map { "\($0.name) wird aufgenommen" } ?? "Gerade läuft kein Spiel")
+                            .font(.headline)
+                        Text("Automatisch erkannt: Minecraft Java, Steam-, Epic- und App-Store-Spiele u. v. m.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section {
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Programm suchen", text: $search).textFieldStyle(.plain)
+                }
+                if filteredApps.isEmpty {
+                    Text("Keine Programme gefunden").foregroundStyle(.secondary)
+                }
+                ForEach(filteredApps) { app in
+                    AppRuleRow(name: app.name, icon: app.icon, ruleKey: app.ruleKey,
+                               status: app.detection ?? "Wird nicht aufgenommen", isGame: app.isGame)
                 }
             } header: {
-                Text("Automatische Erkennung")
+                Text("Laufende Programme")
             } footer: {
-                Text("Erkannt werden u. a. Minecraft Java Edition (auch über Prism, Lunar, CurseForge …), Steam- und Epic-Spiele, Apps aus der Kategorie „Spiele“ sowie viele bekannte Engines. Fehlt ein Spiel, markiere es unten einfach selbst.")
+                Text("Auto = Simplex Recorder entscheidet selbst · Aufnehmen = immer als Spiel behandeln · Nie = niemals aufnehmen. Geht auch direkt über das Menüleisten-Symbol.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Laufende Programme") {
-                if detector.runningApps.isEmpty {
-                    Text("Keine Programme gefunden").foregroundStyle(.secondary)
+            Section {
+                ForEach(settings.includedApps, id: \.self) { key in
+                    SavedRuleRow(key: key, include: true)
                 }
-                ForEach(detector.runningApps) { app in
-                    HStack(spacing: 10) {
-                        if let icon = app.icon {
-                            Image(nsImage: icon).resizable().frame(width: 22, height: 22)
-                        } else {
-                            Image(systemName: "app").frame(width: 22, height: 22)
-                        }
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(app.name)
-                            Text(app.detection ?? "Kein Spiel")
-                                .font(.caption)
-                                .foregroundStyle(app.isGame ? Color.green : Color.secondary)
-                        }
-                        Spacer()
-                        Picker("", selection: Binding(
-                            get: { RuleChoice(settings.rule(for: app.ruleKey)) },
-                            set: { settings.setRule(for: app.ruleKey, include: $0.value); detector.scan() })) {
-                            ForEach(RuleChoice.allCases) { Text($0.title).tag($0) }
-                        }
-                        .labelsHidden()
-                        .frame(width: 170)
+                ForEach(settings.excludedApps, id: \.self) { key in
+                    SavedRuleRow(key: key, include: false)
+                }
+                if settings.includedApps.isEmpty && settings.excludedApps.isEmpty {
+                    Text("Noch keine eigenen Regeln").foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button {
+                        addApp(include: true)
+                    } label: {
+                        Label("Spiel hinzufügen …", systemImage: "plus.circle.fill")
+                    }
+                    Button {
+                        addApp(include: false)
+                    } label: {
+                        Label("Programm ausschließen …", systemImage: "nosign")
                     }
                 }
-            }
-
-            if !settings.includedApps.isEmpty || !settings.excludedApps.isEmpty {
-                Section("Eigene Regeln") {
-                    ForEach(settings.includedApps, id: \.self) { key in
-                        ruleRow(key: key, text: "Immer aufnehmen", color: .green)
-                    }
-                    ForEach(settings.excludedApps, id: \.self) { key in
-                        ruleRow(key: key, text: "Nie aufnehmen", color: .red)
-                    }
-                }
+            } header: {
+                Text("Eigene Regeln")
+            } footer: {
+                Text("Regeln gelten auch für Programme, die gerade nicht laufen.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .onAppear { detector.scan() }
     }
 
-    private func ruleRow(key: String, text: String, color: Color) -> some View {
-        HStack {
-            Text(key).font(.system(.body, design: .monospaced))
+    private func addApp(include: Bool) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = include ? "Als Spiel aufnehmen" : "Ausschließen"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            let bundle = Bundle(url: url)
+            let key = bundle?.bundleIdentifier ?? url.deletingPathExtension().lastPathComponent
+            let name = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                ?? url.deletingPathExtension().lastPathComponent
+            AppState.shared.setRule(key: key, name: name, include: include)
+        }
+    }
+}
+
+/// One row with icon, status and a segmented Auto / Aufnehmen / Nie control.
+struct AppRuleRow: View {
+    @EnvironmentObject private var settings: AppSettings
+    let name: String
+    let icon: NSImage?
+    let ruleKey: String
+    let status: String
+    let isGame: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if let icon {
+                    Image(nsImage: icon).resizable()
+                } else {
+                    Image(systemName: "app.dashed").resizable().foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).lineLimit(1)
+                HStack(spacing: 4) {
+                    Circle().fill(isGame ? Color.green : Color.secondary.opacity(0.5)).frame(width: 6, height: 6)
+                    Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
             Spacer()
-            Text(text).foregroundStyle(color).font(.caption)
+            Picker("", selection: Binding(
+                get: { RuleChoice(settings.rule(for: ruleKey)) },
+                set: { AppState.shared.setRule(key: ruleKey, name: name, include: $0.value) })) {
+                ForEach(RuleChoice.allCases) { Text($0.shortTitle).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 210)
+        }
+    }
+}
+
+/// A saved rule, resolved to the app's real name and icon where possible.
+struct SavedRuleRow: View {
+    let key: String
+    let include: Bool
+
+    private var appURL: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: key) }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let url = appURL {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 22, height: 22)
+            } else {
+                Image(systemName: "app.dashed").frame(width: 22, height: 22).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(displayName)
+                Text(key).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Label(include ? "Immer aufnehmen" : "Nie aufnehmen",
+                  systemImage: include ? "checkmark.circle.fill" : "nosign")
+                .font(.caption)
+                .foregroundStyle(include ? Color.green : Color.red)
             Button {
-                settings.setRule(for: key, include: nil)
-                detector.scan()
+                AppState.shared.setRule(key: key, name: displayName, include: nil)
             } label: {
-                Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .help("Regel entfernen")
+        }
+    }
+
+    private var displayName: String {
+        guard let url = appURL else { return key }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+}
+
+// MARK: - Fenster
+
+struct WindowSettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var detector: GameDetector
+    @State private var trusted = GameWindowAssistant.isTrusted
+    private let refresh = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Form {
+            Section {
+                SnapIllustration()
+                    .frame(height: 150)
+                    .frame(maxWidth: .infinity)
+            }
+
+            Section {
+                Toggle("Fenster-Assistent für Spiele", isOn: $settings.snapAssistEnabled)
+                Toggle("Spielfenster beim Start automatisch einpassen", isOn: $settings.autoMaximizeGames)
+                Toggle("Start-Animation „Clipping aktiv“", isOn: $settings.showStartAnimation)
+                LabeledContent("Einpassen / Wiederherstellen") { HotKeyRecorder(combo: $settings.maximizeHotKey) }
+            } header: {
+                Text("Fenstermanagement")
+            } footer: {
+                Text("Zieh das Spielfenster an den oberen Bildschirmrand: Eine Vorschau zeigt, wo es landet. Loslassen → es füllt den Bildschirm, Menüleiste und Dock bleiben sichtbar. Linker/rechter Rand → halber Bildschirm.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Sofort anordnen") {
+                HStack {
+                    Button("Bildschirm füllen") { GameWindowAssistant.shared.perform(.maximize) }
+                    Button("Links") { GameWindowAssistant.shared.perform(.leftHalf) }
+                    Button("Rechts") { GameWindowAssistant.shared.perform(.rightHalf) }
+                    Button("Zentriert") { GameWindowAssistant.shared.perform(.center) }
+                    Spacer()
+                    Button("Zurücksetzen") { GameWindowAssistant.shared.restore() }
+                }
+                .disabled(detector.currentGame == nil)
+                if detector.currentGame == nil {
+                    Text("Starte ein Spiel, um sein Fenster anzuordnen.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Berechtigung") {
+                PermissionRow(title: "Bedienungshilfen",
+                              detail: "Nötig, damit Simplex Recorder Spielfenster verschieben und vergrößern darf.",
+                              granted: trusted,
+                              actionTitle: "Erlauben …") {
+                    GameWindowAssistant.requestTrust()
+                    GameWindowAssistant.openAccessibilitySettings()
+                }
+                if !trusted {
+                    HStack {
+                        Text("Schalter ist an, aber hier steht trotzdem „fehlt“? Eintrag einer älteren Version – zurücksetzen und neu erlauben.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Zurücksetzen") {
+                            GameWindowAssistant.resetTrust()
+                            GameWindowAssistant.requestTrust()
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onReceive(refresh) { _ in trusted = GameWindowAssistant.isTrusted }
+    }
+}
+
+/// Small animated sketch of the snap gesture.
+struct SnapIllustration: View {
+    var body: some View {
+        GeometryReader { geo in
+            let w = min(geo.size.width, 300.0)
+            let h = geo.size.height
+            ZStack(alignment: .top) {
+                RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.12))
+                // Menu bar
+                Rectangle().fill(Color.secondary.opacity(0.3)).frame(height: 8)
+                // Dock
+                VStack {
+                    Spacer()
+                    Capsule().fill(Color.secondary.opacity(0.3)).frame(width: w * 0.5, height: 10).padding(.bottom, 4)
+                }
+                // Animated window
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(LinearGradient(colors: [Color(red: 0.3, green: 0.6, blue: 0.3), Color(red: 0.25, green: 0.45, blue: 0.2)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(Color.black.opacity(0.35)).frame(height: 6)
+                    }
+                    .phaseAnimator([0, 1, 2]) { view, phase in
+                        view
+                            .frame(width: phase == 2 ? w - 12 : w * 0.45, height: phase == 2 ? h - 30 : h * 0.4)
+                            .offset(x: phase == 0 ? w * 0.12 : 0, y: phase == 0 ? h * 0.42 : (phase == 1 ? 10 : 12))
+                    } animation: { phase in
+                        phase == 0 ? .easeInOut(duration: 0.8).delay(0.8) : .spring(response: 0.6, dampingFraction: 0.75).delay(0.4)
+                    }
+                Image(systemName: "cursorarrow")
+                    .font(.system(size: 16))
+                    .phaseAnimator([0, 1, 2]) { view, phase in
+                        view.offset(x: phase == 0 ? w * 0.12 : 0, y: phase == 0 ? h * 0.42 : 10)
+                            .opacity(phase == 2 ? 0 : 1)
+                    } animation: { phase in
+                        phase == 0 ? .easeInOut(duration: 0.8).delay(0.8) : .spring(response: 0.6, dampingFraction: 0.75).delay(0.4)
+                    }
+            }
+            .frame(width: w, height: h)
+            .frame(maxWidth: .infinity)
         }
     }
 }
@@ -401,6 +609,14 @@ enum RuleChoice: String, CaseIterable, Identifiable {
         case .automatic: return "Automatisch"
         case .always: return "Immer aufnehmen"
         case .never: return "Nie aufnehmen"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .automatic: return "Auto"
+        case .always: return "Aufnehmen"
+        case .never: return "Nie"
         }
     }
 }

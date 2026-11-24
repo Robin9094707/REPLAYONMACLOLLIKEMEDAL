@@ -10,6 +10,9 @@ Die App läuft unauffällig in der Menüleiste und nimmt im Hintergrund auf, sob
 | 🎮 **Automatische Spielerkennung** | Minecraft Java (auch über Prism, Lunar, CurseForge …), Steam- und Epic-Spiele, Apps der Kategorie „Spiele“, bekannte Engines. Eigene Regeln: „Immer aufnehmen“ oder „Nie aufnehmen“ |
 | 🪟 **Nur das Spielfenster** | Standard-Modus: Nur das Spielfenster wird aufgenommen, egal wo es liegt oder was darüber ist. Die Titelleiste wird weggeschnitten, Vollbild und Größenänderung laufen ohne Unterbrechung |
 | ⌨️ **Globale Tastenkürzel** | **⌥⇧S** = Clip, **⌥⇧L** = langer Clip (z. B. 2 min), **⌥⇧X** = Screenshot, **⌥⇧P** = Pause. Frei belegbar und auch im Vollbild nutzbar |
+| 🪄 **Fenster-Assistent** | Spielfenster an den oberen Rand ziehen: Es füllt den Bildschirm, Menüleiste und Dock bleiben sichtbar. Linker/rechter Rand ergibt eine Bildschirmhälfte, **⌥⇧F** passt ein bzw. stellt wieder her. Braucht die Bedienungshilfen-Berechtigung |
+| 🎬 **Start-Animation** | Einblendung „Clipping aktiv“, sobald ein Spiel erkannt wurde |
+| 🎯 **Ein-/Ausschließen** | Aktuelles Programm direkt im Menüleisten-Menü als Spiel markieren oder ausschließen. Auf der Spiele-Seite: Suche, Umschalter und „Programm hinzufügen“ |
 | ✨ **Einblendung im Spiel** | Kleine Einblendung „Clip gespeichert“ über dem Spiel, die selbst nicht aufgenommen wird |
 | 🎚 **Qualitäts-Voreinstellungen** | Sparsam · Ausgewogen · Maximal · Butterweich (120 FPS) |
 | 📋 **Komfort** | Clip automatisch in die Zwischenablage (für Discord), im Finder zeigen, Puffer-Timer in der Menüleiste |
