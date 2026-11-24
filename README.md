@@ -1,9 +1,26 @@
-# 🎬 Simplex Recorder
+# 🧰 Simplex Suite
 
-**Replay-Recorder für macOS, ähnlich wie Medal unter Windows.**
+**Die Werkzeugkiste für deinen Mac: Replay-Recorder wie Medal, Taskmanager, Aufräumen & Deinstallieren, App-Starter, Windows-Tastatur, Fenster-Assistent und Dock-Vorschauen.**
+
+(Früher „Simplex Recorder“. Einstellungen werden übernommen.)
 Die App läuft unauffällig in der Menüleiste und nimmt im Hintergrund auf, sobald ein Spiel läuft (z. B. **Minecraft Java Edition**). Ein Tastendruck speichert die **letzten 30 Sekunden** als Clip.
 
-## Funktionen
+## Suite-Werkzeuge
+
+| | |
+|---|---|
+| 🧰 **Dashboard in der Menüleiste** | Werkzeug-Symbol, ein Klick zeigt CPU, Temperatur, RAM und freien Speicher als Anzeigen, die Clip-Steuerung, Schnellzugriffe und alle aktiven Apps mit Verbrauch. Einzelne Apps beenden oder **alle auf einmal** |
+| 📊 **Taskmanager** | Sortierbare Tabelle (CPU, Speicher, Prozesse), Verlaufskurven, Hintergrundprozesse, Beenden und Sofort-Beenden |
+| 🗑 **Aufräumen & Deinstallieren** | Programme **restlos** entfernen (Einstellungen, Caches, Container, Startobjekte; Apple-Apps sind geschützt), **große Dateien** finden, Caches, Logs, Xcode-Daten, Papierkorb und alte Installer sicher löschen |
+| 🔎 **App-Starter** | **Windows-Taste antippen** öffnet ein Startmenü mit allen Apps und Suche |
+| ⌨️ **Windows-Tastatur** | **Strg+C/V/X/A/Z/Y/S/F …** wirken wie ⌘, dazu Pos1/Ende und Strg+Pfeiltasten. Ausgenommen sind Terminals, VMs und Spiele |
+| ❌ **Rotes X beendet** | Wird das letzte Fenster geschlossen, beendet sich die App ganz (mit Ausnahmen, z. B. Musik) |
+| 🪟 **Dock-Vorschau** | Fenster-Miniaturen beim Darüberfahren im Dock, Klick holt das Fenster nach vorne |
+| 🪄 **Fenster-Assistent** | Fenster an den Rand ziehen, um sie einzurasten. Wahlweise nur für Spiele oder für alle Programme |
+
+Systemzugriff: **Bildschirmaufnahme** (Clips, Dock-Vorschau) und **Bedienungshilfen** (Tastatur, Fenster, rotes X, Dock).
+
+## Clip-Funktionen
 
 | | |
 |---|---|
