@@ -197,6 +197,7 @@ final class AppSettings: ObservableObject {
     @Published var hasCompletedOnboarding: Bool { didSet { d.set(hasCompletedOnboarding, forKey: K.onboarding) } }
 
     private init() {
+        let d = UserDefaults.standard
         d.register(defaults: [
             K.replayDuration: 30,
             K.fps: 60,

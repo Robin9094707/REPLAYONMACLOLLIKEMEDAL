@@ -34,10 +34,16 @@ enum ClipExporter {
 
         let endPTS = last.presentationTimeStamp
         let desiredStart = CMTimeSubtract(endPTS, CMTime(seconds: duration, preferredTimescale: 600))
-        let keyIndices = (firstSameFormat..<video.count).filter { ReplayBuffer.isKeyframe(video[$0]) }
+        var keyIndices: [Int] = []
+        for index in firstSameFormat..<video.count where ReplayBuffer.isKeyframe(video[index]) {
+            keyIndices.append(index)
+        }
         guard let firstKey = keyIndices.first else { throw ClipExportError.noVideo }
-        let startIndex = keyIndices.last(where: { CMTimeCompare(video[$0].presentationTimeStamp, desiredStart) <= 0 }) ?? firstKey
-        let clipVideo = Array(video[startIndex...])
+        var clipStart: Int = firstKey
+        for index in keyIndices where CMTimeCompare(video[index].presentationTimeStamp, desiredStart) <= 0 {
+            clipStart = index
+        }
+        let clipVideo: [CMSampleBuffer] = Array(video[clipStart..<video.count])
         let startPTS = clipVideo[0].presentationTimeStamp
 
         try? FileManager.default.removeItem(at: url)

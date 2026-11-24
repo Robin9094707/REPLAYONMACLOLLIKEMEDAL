@@ -32,7 +32,7 @@ enum ReplayEngineError: LocalizedError {
 final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     let buffer = ReplayBuffer()
 
-    private var stream: SCStream?
+    private var scStream: SCStream?
     private var encoder: VTCompressionSession?
     private let videoQueue = DispatchQueue(label: "com.simplex.recorder.video", qos: .userInteractive)
     private let audioQueue = DispatchQueue(label: "com.simplex.recorder.audio", qos: .userInitiated)
@@ -151,15 +151,15 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
             try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: audioQueue)
         }
         try await stream.startCapture()
-        self.stream = stream
+        self.scStream = stream
     }
 
     func stop() async {
         setRunning(false)
-        if let stream {
+        if let stream = scStream {
             try? await stream.stopCapture()
         }
-        stream = nil
+        scStream = nil
         teardownEncoder()
     }
 
