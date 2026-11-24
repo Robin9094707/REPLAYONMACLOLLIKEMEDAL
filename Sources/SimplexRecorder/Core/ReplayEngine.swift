@@ -298,6 +298,29 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         return copy
     }
 
+    private func handleVideo(_ sampleBuffer: CMSampleBuffer) {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let info = attachments.first,
+              let statusRaw = info[.status] as? Int,
+              let status = SCFrameStatus(rawValue: statusRaw),
+              status == .complete,
+              let pixelBuffer = sampleBuffer.imageBuffer,
+              let encoder else { return }
+
+        let buffer = self.buffer
+        VTCompressionSessionEncodeFrame(
+            encoder,
+            imageBuffer: pixelBuffer,
+            presentationTimeStamp: sampleBuffer.presentationTimeStamp,
+            duration: frameDuration,
+            frameProperties: nil,
+            infoFlagsOut: nil
+        ) { status, _, encoded in
+            guard status == noErr, let encoded else { return }
+            buffer.appendVideo(encoded)
+        }
+    }
+
     // MARK: SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
