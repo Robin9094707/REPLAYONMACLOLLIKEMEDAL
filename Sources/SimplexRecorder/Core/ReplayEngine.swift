@@ -37,6 +37,12 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     /// Per-app audio attribution is unreliable for games launched through launchers
     /// (e.g. Minecraft Java runs in a `java` child process of the launcher).
     private var audioStream: SCStream?
+    private var audioFilter: SCContentFilter?
+    private var audioConfig: CaptureConfig?
+    private var audioIncludesMic = false
+    private var lastAudioPacket = Date.distantPast
+    private var lastAudioRestart = Date.distantPast
+    private var audioRestarting = false
     private var audioOffset: CMTime?
     private var micOffset: CMTime?
     private var audioPackets = 0
@@ -170,8 +176,8 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     private func startAudioStream(filter: SCContentFilter, config: CaptureConfig, includeMicrophone: Bool) async throws {
         let sc = SCStreamConfiguration()
         // Video is required by ScreenCaptureKit but unused here – keep it as tiny as possible.
-        sc.width = 32
-        sc.height = 32
+        sc.width = 128
+        sc.height = 72
         sc.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         sc.queueDepth = 3
         sc.showsCursor = false
@@ -193,6 +199,37 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         try await stream.startCapture()
         self.audioStream = stream
+        self.audioFilter = filter
+        self.audioConfig = config
+        self.audioIncludesMic = includeMicrophone
+        self.lastAudioPacket = Date()
+    }
+
+    /// Watchdog, called about once per second: restarts the audio stream if it stopped
+    /// or has not delivered anything for a while.
+    func checkAudioHealth() {
+        guard isRunning, !audioRestarting, let filter = audioFilter, let config = audioConfig,
+              config.captureSystemAudio || config.captureMicrophone else { return }
+        let silentFor = Date().timeIntervalSince(lastAudioPacket)
+        let stopped = audioStream == nil
+        guard stopped || silentFor > 8 else { return }
+        guard Date().timeIntervalSince(lastAudioRestart) > 15 else { return }
+        lastAudioRestart = Date()
+        audioRestarting = true
+        DiagnosticsLog.write("audio watchdog: \(stopped ? "stream stopped" : "no audio for \(Int(silentFor)) s") – restarting audio stream")
+        let old = audioStream
+        audioStream = nil
+        let includeMic = audioIncludesMic
+        Task {
+            if let old { try? await old.stopCapture() }
+            do {
+                try await self.startAudioStream(filter: filter, config: config, includeMicrophone: includeMic)
+                DiagnosticsLog.write("audio watchdog: restarted")
+            } catch {
+                DiagnosticsLog.write("audio watchdog: restart failed: \(error)")
+            }
+            self.audioRestarting = false
+        }
     }
 
     func stop() async {
@@ -200,6 +237,8 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         if let stream = scStream {
             try? await stream.stopCapture()
         }
+        audioFilter = nil
+        audioConfig = nil
         if let stream = audioStream {
             try? await stream.stopCapture()
         }
@@ -287,6 +326,7 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         let copy = AudioCopy.deepCopy(sample, offset: offset ?? .zero)
         if let copy {
             audioPackets += 1
+            lastAudioPacket = Date()
             audioPeak = max(audioPeak, AudioCopy.peak(of: copy))
             if audioPackets % 1500 == 0 { // ~ every 30 s
                 DiagnosticsLog.write("audio: \(audioPackets) packets, peak level \(String(format: "%.4f", audioPeak))\(audioPeak < 0.0001 ? " (STILLE)" : "")")

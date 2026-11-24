@@ -36,6 +36,9 @@ final class ReplayBuffer {
     var audioSeconds: Double {
         locked {
             guard let first = audio.first, let last = audio.last else { return 0 }
+            // Stale audio (stream stalled) counts as "no audio".
+            let now = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+            if now - last.presentationTimeStamp.seconds > 3 { return 0 }
             return max(0, last.presentationTimeStamp.seconds - first.presentationTimeStamp.seconds)
         }
     }
@@ -113,8 +116,11 @@ final class ReplayBuffer {
     }
 
     private func trimAudioLocked() {
+        // Audio is aligned to the host clock, so "now" is a safe reference – this also
+        // drops stale leftovers if the audio stream stalled.
         let latestAudio = max(audio.last?.presentationTimeStamp.seconds ?? 0,
-                              mic.last?.presentationTimeStamp.seconds ?? 0)
+                              mic.last?.presentationTimeStamp.seconds ?? 0,
+                              CMClockGetTime(CMClockGetHostTimeClock()).seconds)
         // Trim on the audio's own timeline only – never relative to video timestamps.
         let cutoff = latestAudio - _maxSeconds - 2
         if let index = audio.firstIndex(where: { $0.presentationTimeStamp.seconds >= cutoff }) {

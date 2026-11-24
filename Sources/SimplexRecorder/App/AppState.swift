@@ -130,6 +130,7 @@ final class AppState: ObservableObject {
         let seconds = engine.isRunning ? engine.buffer.bufferedSeconds : 0
         let rounded = min(seconds, Double(settings.replayDuration)).rounded()
         if rounded != bufferedSeconds { bufferedSeconds = rounded }
+        engine.checkAudioHealth()
         let audio = engine.isRunning ? min(engine.buffer.audioSeconds, Double(settings.replayDuration)).rounded() : 0
         if audio != audioBufferedSeconds { audioBufferedSeconds = audio }
         let mb = engine.buffer.approximateBytes / 1_000_000
