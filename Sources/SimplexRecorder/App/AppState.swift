@@ -1,0 +1,402 @@
+import AppKit
+import Combine
+import SwiftUI
+
+/// Central coordinator: decides when to capture, saves clips, wires hotkeys.
+@MainActor
+final class AppState: ObservableObject {
+    static let shared = AppState()
+
+    enum Status: Equatable {
+        case idle
+        case waitingForGame
+        case recording(String)
+        case paused
+        case needsPermission
+        case error(String)
+    }
+
+    @Published private(set) var status: Status = .idle
+    @Published private(set) var isSaving = false
+    @Published private(set) var bufferedSeconds: Double = 0
+    @Published private(set) var bufferMB: Int = 0
+    @Published private(set) var lastSavedClip: URL?
+
+    let settings: AppSettings
+    let detector: GameDetector
+    let storage: StorageMonitor
+    let library: ClipLibrary
+    private let engine = ReplayEngine()
+
+    private var activeSignature: String?
+    private var activeGameName: String?
+    private var transition: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
+    private var cancellables = Set<AnyCancellable>()
+    private var statsTimer: Timer?
+    private var launched = false
+    private var registeredClipKey: KeyCombo?
+    private var registeredPauseKey: KeyCombo?
+    private var lastFolderPath = ""
+    private var tickCount = 0
+
+    private init() {
+        settings = AppSettings.shared
+        detector = GameDetector(settings: AppSettings.shared)
+        storage = StorageMonitor()
+        library = ClipLibrary()
+    }
+
+    // MARK: Lifecycle
+
+    func launch() {
+        guard !launched else { return }
+        launched = true
+
+        NotificationManager.shared.setup()
+        engine.buffer.maxSeconds = Double(settings.replayDuration) + 3
+        engine.onUnexpectedStop = { [weak self] error in
+            Task { @MainActor in self?.handleUnexpectedStop(error) }
+        }
+
+        detector.start()
+        registerHotKeys()
+
+        detector.$currentGame
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.scheduleReevaluate() }
+            .store(in: &cancellables)
+
+        settings.objectWillChange
+            .debounce(for: .milliseconds(350), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.settingsChanged() }
+            .store(in: &cancellables)
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
+        }
+        timer.tolerance = 0.3
+        statsTimer = timer
+
+        lastFolderPath = settings.saveFolderPath
+        refreshLibrary()
+        scheduleReevaluate()
+    }
+
+    func refreshLibrary() {
+        library.reload(folder: settings.saveFolderURL)
+        storage.refresh(folder: settings.saveFolderURL)
+    }
+
+    private func settingsChanged() {
+        engine.buffer.maxSeconds = Double(settings.replayDuration) + 3
+        registerHotKeys()
+        if settings.saveFolderPath != lastFolderPath {
+            lastFolderPath = settings.saveFolderPath
+            refreshLibrary()
+        }
+        scheduleReevaluate()
+    }
+
+    private func tick() {
+        tickCount &+= 1
+        if tickCount % 60 == 0 { storage.refresh(folder: settings.saveFolderURL) }
+        if settings.isPaused, let until = settings.pausedUntil, until <= Date() {
+            settings.isPaused = false
+            settings.pausedUntil = nil
+        }
+        let seconds = engine.isRunning ? engine.buffer.bufferedSeconds : 0
+        let rounded = min(seconds, Double(settings.replayDuration)).rounded()
+        if rounded != bufferedSeconds { bufferedSeconds = rounded }
+        let mb = engine.buffer.approximateBytes / 1_000_000
+        if mb != bufferMB { bufferMB = mb }
+        // Re-check permission state cheaply while waiting for it.
+        if status == .needsPermission, Permissions.hasScreenRecording { scheduleReevaluate() }
+    }
+
+    // MARK: Capture state machine
+
+    func scheduleReevaluate() {
+        let previous = transition
+        transition = Task { [weak self] in
+            await previous?.value
+            await self?.applyDesiredState()
+        }
+    }
+
+    private func applyDesiredState() async {
+        guard Permissions.hasScreenRecording else {
+            await stopEngine()
+            status = .needsPermission
+            return
+        }
+        if settings.isPausedNow {
+            await stopEngine()
+            status = .paused
+            return
+        }
+        let game = detector.currentGame
+        if settings.recordingMode == .gamesOnly && game == nil {
+            await stopEngine()
+            status = .waitingForGame
+            return
+        }
+
+        let config = makeConfig()
+        let signature = makeSignature(game: game, config: config)
+        if engine.isRunning && signature == activeSignature { return }
+
+        await stopEngine()
+        do {
+            try await engine.start(game: game, config: config)
+            activeSignature = signature
+            activeGameName = game?.name ?? "Bildschirm"
+            status = .recording(activeGameName ?? "Bildschirm")
+            retryTask?.cancel()
+        } catch {
+            status = .error(error.localizedDescription)
+            scheduleRetry(after: 8)
+        }
+    }
+
+    private func stopEngine() async {
+        if engine.isRunning { await engine.stop() }
+        activeSignature = nil
+    }
+
+    private func makeConfig() -> CaptureConfig {
+        CaptureConfig(fps: settings.fps,
+                      bitrateMbps: settings.bitrateMbps,
+                      codec: settings.codec,
+                      maxHeight: settings.resolution.maxHeight,
+                      captureSystemAudio: settings.captureSystemAudio,
+                      captureMicrophone: settings.captureMicrophone,
+                      showCursor: settings.showCursor,
+                      target: settings.captureTarget)
+    }
+
+    private func makeSignature(game: DetectedGame?, config: CaptureConfig) -> String {
+        var sig = "\(game?.pid ?? -1)|\(config)"
+        if config.target == .gameWindow, let size = game?.windowSize {
+            sig += "|\(Int(size.width))x\(Int(size.height))"
+        }
+        return sig
+    }
+
+    private func handleUnexpectedStop(_ error: Error) {
+        activeSignature = nil
+        if case .recording = status { status = .error("Aufnahme unterbrochen – starte neu …") }
+        scheduleRetry(after: 3)
+    }
+
+    private func scheduleRetry(after seconds: Double) {
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.scheduleReevaluate()
+        }
+    }
+
+    // MARK: Hotkeys
+
+    func registerHotKeys() {
+        if registeredClipKey != settings.clipHotKey {
+            registeredClipKey = settings.clipHotKey
+            HotKeyCenter.shared.register(id: 1, combo: settings.clipHotKey) {
+                Task { @MainActor in AppState.shared.saveClip() }
+            }
+        }
+        if registeredPauseKey != settings.pauseHotKey {
+            registeredPauseKey = settings.pauseHotKey
+            HotKeyCenter.shared.register(id: 2, combo: settings.pauseHotKey) {
+                Task { @MainActor in AppState.shared.togglePause() }
+            }
+        }
+    }
+
+    /// Used by the shortcut recorder so the old combo doesn't fire while typing a new one.
+    func suspendHotKeys() {
+        HotKeyCenter.shared.unregisterAll()
+        registeredClipKey = nil
+        registeredPauseKey = nil
+    }
+
+    // MARK: Clips
+
+    var canSaveClip: Bool {
+        if case .recording = status { return !isSaving }
+        return !isSaving && bufferedSeconds > 0
+    }
+
+    func saveClip() {
+        guard !isSaving else { return }
+        let snapshot = engine.buffer.snapshot()
+        guard !snapshot.isEmpty else {
+            NSSound.beep()
+            if settings.showNotifications {
+                NotificationManager.shared.notify(title: "Kein Clip möglich",
+                                                  body: "Gerade läuft keine Aufnahme – starte ein Spiel.")
+            }
+            return
+        }
+
+        let gameName = activeGameName ?? "Clip"
+        let destination: URL
+        do {
+            destination = try makeClipURL(gameName: gameName)
+        } catch {
+            NSSound.beep()
+            NotificationManager.shared.notify(title: "Speichern fehlgeschlagen", body: error.localizedDescription)
+            return
+        }
+
+        isSaving = true
+        let duration = Double(settings.replayDuration)
+        let maxBytes = Int64(settings.maxClipStorageGB) * 1_000_000_000
+        let folder = settings.saveFolderURL
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try ClipExporter.writeClip(snapshot: snapshot, duration: duration, to: destination) }
+            if case .success = result, maxBytes > 0 {
+                ClipLibrary.enforceLimit(folder: folder, maxBytes: maxBytes)
+            }
+            Task { @MainActor in
+                AppState.shared.finishSaving(result: result, url: destination, gameName: gameName)
+            }
+        }
+    }
+
+    private func finishSaving(result: Result<Double, Error>, url: URL, gameName: String) {
+        isSaving = false
+        switch result {
+        case .success(let seconds):
+            lastSavedClip = url
+            if settings.playSound { NSSound(named: NSSound.Name(settings.clipSound))?.play() }
+            if settings.showNotifications {
+                NotificationManager.shared.notify(title: "Clip gespeichert 🎬",
+                                                  body: "\(gameName) · \(Int(seconds.rounded())) Sekunden – klicken zum Anzeigen",
+                                                  fileURL: url)
+            }
+        case .failure(let error):
+            try? FileManager.default.removeItem(at: url)
+            NSSound.beep()
+            NotificationManager.shared.notify(title: "Clip konnte nicht gespeichert werden",
+                                              body: error.localizedDescription)
+        }
+        refreshLibrary()
+    }
+
+    private func makeClipURL(gameName: String) throws -> URL {
+        let fm = FileManager.default
+        var base = settings.saveFolderURL
+        let components = base.standardizedFileURL.pathComponents
+        if components.count >= 3, components[1] == "Volumes", !fm.fileExists(atPath: "/Volumes/\(components[2])") {
+            base = AppSettings.defaultSaveFolder
+            if settings.showNotifications {
+                NotificationManager.shared.notify(
+                    title: "Festplatte „\(components[2])“ nicht verbunden",
+                    body: "Der Clip wird stattdessen in „Filme/Simplex Recorder“ gespeichert.")
+            }
+        }
+        let safeName = Self.sanitize(gameName)
+        if settings.organizeByGame { base.appendPathComponent(safeName, isDirectory: true) }
+        try fm.createDirectory(at: base, withIntermediateDirectories: true)
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        formatter.dateFormat = "yyyy-MM-dd 'um' HH.mm.ss"
+        return base.appendingPathComponent("\(safeName) \(formatter.string(from: Date())).mp4")
+    }
+
+    private static func sanitize(_ name: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+        let cleaned = name.components(separatedBy: invalid).joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "Clip" : cleaned
+    }
+
+    func openClipFolder() {
+        let folder = settings.saveFolderURL
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
+    }
+
+    // MARK: Pause
+
+    func pause(minutes: Int?) {
+        settings.pausedUntil = minutes.map { Date().addingTimeInterval(Double($0) * 60) }
+        settings.isPaused = true
+    }
+
+    func resume() {
+        settings.isPaused = false
+        settings.pausedUntil = nil
+    }
+
+    func togglePause() {
+        if settings.isPausedNow {
+            resume()
+            NSSound(named: NSSound.Name("Tink"))?.play()
+        } else {
+            pause(minutes: nil)
+            NSSound(named: NSSound.Name("Pop"))?.play()
+        }
+    }
+
+    // MARK: Background / autostart
+
+    /// Rewrites the LaunchAgent and restarts the app under it.
+    func applyBackgroundSettings() {
+        LaunchAgentManager.applyAndRelaunch(runAtLoad: settings.launchAtLogin, keepAlive: settings.keepAlive)
+    }
+
+    func confirmQuit() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Simplex Recorder beenden?"
+        alert.informativeText = "Solange die App beendet ist, werden keine Clips aufgenommen. Du kannst die Aufnahme stattdessen auch nur pausieren."
+        alert.addButton(withTitle: "Beenden")
+        alert.addButton(withTitle: "Nur pausieren")
+        alert.addButton(withTitle: "Abbrechen")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            UserDefaults.standard.synchronize()
+            NSApp.terminate(nil)
+        case .alertSecondButtonReturn:
+            pause(minutes: nil)
+        default:
+            break
+        }
+    }
+
+    // MARK: Presentation
+
+    var statusLine: String {
+        switch status {
+        case .idle: return "Startet …"
+        case .waitingForGame: return "Wartet auf ein Spiel"
+        case .recording(let name): return isSaving ? "Speichert Clip …" : "Replay aktiv – \(name)"
+        case .paused:
+            if let until = settings.pausedUntil {
+                return "Pausiert bis \(until.formatted(date: .omitted, time: .shortened))"
+            }
+            return "Pausiert"
+        case .needsPermission: return "Bildschirmaufnahme-Erlaubnis fehlt"
+        case .error(let message): return message
+        }
+    }
+
+    var menuBarSymbol: String {
+        switch status {
+        case .recording: return isSaving ? "arrow.down.circle.fill" : "record.circle.fill"
+        case .paused: return "pause.circle"
+        case .needsPermission, .error: return "exclamationmark.circle"
+        case .idle, .waitingForGame: return "gamecontroller"
+        }
+    }
+
+    var isRecording: Bool {
+        if case .recording = status { return true }
+        return false
+    }
+}
