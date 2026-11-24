@@ -5,8 +5,10 @@ struct DetectedGame: Equatable, Identifiable {
     let pid: pid_t
     let name: String
     let bundleID: String?
-    /// Size (points) of the largest window, used to restart window captures on resize.
+    /// Size (points) of the largest window – window captures adapt their crop to it.
     let windowSize: CGSize
+    /// CGWindowID of the game's main (largest) window, 0 if unknown.
+    let windowID: UInt32
     var id: pid_t { pid }
 }
 
@@ -105,6 +107,7 @@ final class GameDetector: ObservableObject {
 
     private struct WindowSummary {
         var largestSize: CGSize = .zero
+        var largestID: UInt32 = 0
         var titles: [String] = []
         var hasGameSizedWindow: Bool { largestSize.width >= 320 && largestSize.height >= 240 }
     }
@@ -129,7 +132,8 @@ final class GameDetector: ObservableObject {
             }
             if detection != nil {
                 games.append(DetectedGame(pid: pid, name: name, bundleID: app.bundleIdentifier,
-                                          windowSize: Self.rounded(summary?.largestSize ?? .zero)))
+                                          windowSize: Self.rounded(summary?.largestSize ?? .zero),
+                                          windowID: summary?.largestID ?? 0))
             }
         }
 
@@ -241,6 +245,8 @@ final class GameDetector: ObservableObject {
                let rect = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
                rect.width * rect.height > summary.largestSize.width * summary.largestSize.height {
                 summary.largestSize = rect.size
+                summary.largestID = (window[kCGWindowNumber as String] as? UInt32)
+                    ?? UInt32(truncatingIfNeeded: (window[kCGWindowNumber as String] as? Int) ?? 0)
             }
             if let title = window[kCGWindowName as String] as? String, !title.isEmpty {
                 summary.titles.append(title)

@@ -22,6 +22,7 @@ final class AppState: ObservableObject {
     @Published private(set) var bufferMB: Int = 0
     @Published private(set) var audioBufferedSeconds: Double = 0
     @Published private(set) var lastSavedClip: URL?
+    @Published private(set) var clipsThisSession = 0
 
     let settings: AppSettings
     let detector: GameDetector
@@ -38,6 +39,9 @@ final class AppState: ObservableObject {
     private var launched = false
     private var registeredClipKey: KeyCombo?
     private var registeredPauseKey: KeyCombo?
+    private var registeredLongKey: KeyCombo?
+    private var registeredScreenshotKey: KeyCombo?
+    private var longKeyActive = false
     private var lastFolderPath = ""
     private var tickCount = 0
 
@@ -56,7 +60,7 @@ final class AppState: ObservableObject {
 
         NotificationManager.shared.setup()
         handleUpdatedBuild()
-        engine.buffer.maxSeconds = Double(settings.replayDuration) + 3
+        engine.buffer.maxSeconds = Double(settings.bufferSeconds)
         engine.onUnexpectedStop = { [weak self] error in
             Task { @MainActor in self?.handleUnexpectedStop(error) }
         }
@@ -111,7 +115,7 @@ final class AppState: ObservableObject {
     }
 
     private func settingsChanged() {
-        engine.buffer.maxSeconds = Double(settings.replayDuration) + 3
+        engine.buffer.maxSeconds = Double(settings.bufferSeconds)
         registerHotKeys()
         if settings.saveFolderPath != lastFolderPath {
             lastFolderPath = settings.saveFolderPath
@@ -128,7 +132,7 @@ final class AppState: ObservableObject {
             settings.pausedUntil = nil
         }
         let seconds = engine.isRunning ? engine.buffer.bufferedSeconds : 0
-        let rounded = min(seconds, Double(settings.replayDuration)).rounded()
+        let rounded = min(seconds, Double(settings.bufferSeconds - 3)).rounded()
         if rounded != bufferedSeconds { bufferedSeconds = rounded }
         engine.checkAudioHealth()
         let audio = engine.isRunning ? min(engine.buffer.audioSeconds, Double(settings.replayDuration)).rounded() : 0
@@ -171,7 +175,12 @@ final class AppState: ObservableObject {
 
         let config = makeConfig()
         let signature = makeSignature(game: game, config: config)
-        if engine.isRunning && signature == activeSignature { return }
+        if engine.isRunning && signature == activeSignature {
+            if let size = game?.windowSize, size.width > 0 {
+                await engine.updateWindowGeometry(size: size)
+            }
+            return
+        }
 
         await stopEngine()
         do {
@@ -199,14 +208,14 @@ final class AppState: ObservableObject {
                       captureSystemAudio: settings.captureSystemAudio,
                       captureMicrophone: settings.captureMicrophone,
                       showCursor: settings.showCursor,
-                      target: settings.captureTarget)
+                      target: settings.captureTarget,
+                      cropTitleBar: settings.cropTitleBar)
     }
 
     private func makeSignature(game: DetectedGame?, config: CaptureConfig) -> String {
+        // Window captures follow resizes live, so only a *different* window restarts them.
         var sig = "\(game?.pid ?? -1)|\(config)"
-        if config.target == .gameWindow, let size = game?.windowSize {
-            sig += "|\(Int(size.width))x\(Int(size.height))"
-        }
+        if config.target == .gameWindow { sig += "|w\(game?.windowID ?? 0)" }
         return sig
     }
 
@@ -240,6 +249,25 @@ final class AppState: ObservableObject {
                 Task { @MainActor in AppState.shared.togglePause() }
             }
         }
+        let wantedLong: KeyCombo? = settings.longClipEnabled ? settings.longClipHotKey : nil
+        if registeredLongKey != wantedLong || (wantedLong == nil && longKeyActive) {
+            registeredLongKey = wantedLong
+            if let wantedLong {
+                HotKeyCenter.shared.register(id: 3, combo: wantedLong) {
+                    Task { @MainActor in AppState.shared.saveLongClip() }
+                }
+                longKeyActive = true
+            } else {
+                HotKeyCenter.shared.unregister(id: 3)
+                longKeyActive = false
+            }
+        }
+        if registeredScreenshotKey != settings.screenshotHotKey {
+            registeredScreenshotKey = settings.screenshotHotKey
+            HotKeyCenter.shared.register(id: 4, combo: settings.screenshotHotKey) {
+                Task { @MainActor in AppState.shared.takeScreenshot() }
+            }
+        }
     }
 
     /// Used by the shortcut recorder so the old combo doesn't fire while typing a new one.
@@ -247,6 +275,9 @@ final class AppState: ObservableObject {
         HotKeyCenter.shared.unregisterAll()
         registeredClipKey = nil
         registeredPauseKey = nil
+        registeredLongKey = nil
+        registeredScreenshotKey = nil
+        longKeyActive = false
     }
 
     // MARK: Clips
@@ -256,11 +287,16 @@ final class AppState: ObservableObject {
         return !isSaving && bufferedSeconds > 0
     }
 
-    func saveClip() {
+    func saveLongClip() {
+        saveClip(seconds: settings.longClipDuration)
+    }
+
+    func saveClip(seconds requested: Int? = nil) {
         guard !isSaving else { return }
         let snapshot = engine.buffer.snapshot()
         guard !snapshot.isEmpty else {
             NSSound.beep()
+            if settings.showOverlay { OverlayHUD.shared.show(symbol: "xmark.circle.fill", title: "Kein Clip möglich", subtitle: "Gerade läuft keine Aufnahme", tint: .systemRed) }
             if settings.showNotifications {
                 NotificationManager.shared.notify(title: "Kein Clip möglich",
                                                   body: "Gerade läuft keine Aufnahme – starte ein Spiel.")
@@ -281,7 +317,11 @@ final class AppState: ObservableObject {
         }
 
         isSaving = true
-        let duration = Double(settings.replayDuration)
+        let duration = Double(requested ?? settings.replayDuration)
+        if settings.showOverlay {
+            OverlayHUD.shared.show(symbol: "record.circle", title: "Speichere Clip …",
+                                   subtitle: "Letzte \(durationLabel(Int(duration)))", tint: .systemRed, sticky: true)
+        }
         let maxBytes = Int64(settings.maxClipStorageGB) * 1_000_000_000
         let folder = settings.saveFolderURL
         DispatchQueue.global(qos: .userInitiated).async {
@@ -301,7 +341,20 @@ final class AppState: ObservableObject {
         switch result {
         case .success(let seconds):
             lastSavedClip = url
+            clipsThisSession += 1
             if settings.playSound { NSSound(named: NSSound.Name(settings.clipSound))?.play() }
+            if settings.showOverlay {
+                OverlayHUD.shared.show(symbol: "checkmark.circle.fill", title: "Clip gespeichert",
+                                       subtitle: "\(gameName) · \(Int(seconds.rounded())) s\(missingAudio ? " · ohne Ton" : "")",
+                                       tint: .systemGreen)
+            }
+            if settings.copyClipToClipboard {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.writeObjects([url as NSURL])
+            }
+            if settings.revealAfterSave {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
             if settings.showNotifications {
                 NotificationManager.shared.notify(title: "Clip gespeichert 🎬",
                                                   body: "\(gameName) · \(Int(seconds.rounded())) Sekunden\(missingAudio ? " · ohne Ton (kein Systemton empfangen)" : "") – klicken zum Anzeigen",
@@ -310,13 +363,17 @@ final class AppState: ObservableObject {
         case .failure(let error):
             try? FileManager.default.removeItem(at: url)
             NSSound.beep()
+            if settings.showOverlay {
+                OverlayHUD.shared.show(symbol: "exclamationmark.triangle.fill", title: "Speichern fehlgeschlagen",
+                                       subtitle: error.localizedDescription, tint: .systemOrange)
+            }
             NotificationManager.shared.notify(title: "Clip konnte nicht gespeichert werden",
                                               body: error.localizedDescription)
         }
         refreshLibrary()
     }
 
-    private func makeClipURL(gameName: String) throws -> URL {
+    private func makeClipURL(gameName: String, prefix: String = "", ext: String = "mp4") throws -> URL {
         let fm = FileManager.default
         var base = settings.saveFolderURL
         let components = base.standardizedFileURL.pathComponents
@@ -335,7 +392,7 @@ final class AppState: ObservableObject {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "de_DE")
         formatter.dateFormat = "yyyy-MM-dd 'um' HH.mm.ss"
-        return base.appendingPathComponent("\(safeName) \(formatter.string(from: Date())).mp4")
+        return base.appendingPathComponent("\(prefix)\(safeName) \(formatter.string(from: Date())).\(ext)")
     }
 
     private static func sanitize(_ name: String) -> String {
@@ -349,6 +406,46 @@ final class AppState: ObservableObject {
         let folder = settings.saveFolderURL
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         NSWorkspace.shared.open(folder)
+    }
+
+    // MARK: Screenshots
+
+    func takeScreenshot() {
+        guard engine.isRunning else {
+            NSSound.beep()
+            if settings.showOverlay {
+                OverlayHUD.shared.show(symbol: "xmark.circle.fill", title: "Kein Screenshot möglich",
+                                       subtitle: "Gerade läuft keine Aufnahme", tint: .systemRed)
+            }
+            return
+        }
+        let gameName = activeGameName ?? "Screenshot"
+        Task { @MainActor in
+            do {
+                let image = try await engine.screenshot()
+                let url = try makeClipURL(gameName: gameName, prefix: "Screenshot ", ext: "png")
+                let rep = NSBitmapImageRep(cgImage: image)
+                guard let data = rep.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
+                try data.write(to: url)
+                NSSound(named: NSSound.Name("Tink"))?.play()
+                if settings.showOverlay {
+                    OverlayHUD.shared.show(symbol: "camera.fill", title: "Screenshot gespeichert",
+                                           subtitle: "\(image.width)×\(image.height)", tint: .systemBlue)
+                }
+                if settings.copyClipToClipboard {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([NSImage(cgImage: image, size: .zero)])
+                }
+                DiagnosticsLog.write("screenshot saved \(url.lastPathComponent)")
+            } catch {
+                NSSound.beep()
+                DiagnosticsLog.write("screenshot failed: \(error)")
+                if settings.showOverlay {
+                    OverlayHUD.shared.show(symbol: "exclamationmark.triangle.fill", title: "Screenshot fehlgeschlagen",
+                                           subtitle: error.localizedDescription, tint: .systemOrange)
+                }
+            }
+        }
     }
 
     // MARK: Pause
@@ -367,9 +464,16 @@ final class AppState: ObservableObject {
         if settings.isPausedNow {
             resume()
             NSSound(named: NSSound.Name("Tink"))?.play()
+            if settings.showOverlay {
+                OverlayHUD.shared.show(symbol: "play.circle.fill", title: "Aufnahme läuft wieder", subtitle: nil, tint: .systemGreen)
+            }
         } else {
             pause(minutes: nil)
             NSSound(named: NSSound.Name("Pop"))?.play()
+            if settings.showOverlay {
+                OverlayHUD.shared.show(symbol: "pause.circle.fill", title: "Aufnahme pausiert",
+                                       subtitle: "Fortsetzen mit \(settings.pauseHotKey.displayString)", tint: .systemOrange)
+            }
         }
     }
 

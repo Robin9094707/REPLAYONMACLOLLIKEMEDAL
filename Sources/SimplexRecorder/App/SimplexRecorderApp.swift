@@ -14,8 +14,7 @@ struct SimplexRecorderApp: App {
                 .environmentObject(state.library)
                 .environmentObject(state.storage)
         } label: {
-            Image(systemName: state.menuBarSymbol)
-                .accessibilityLabel("Simplex Recorder")
+            MenuBarLabel(state: state, settings: state.settings)
         }
         .menuBarExtraStyle(.menu)
     }
@@ -93,4 +92,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+}
+
+struct MenuBarLabel: View {
+    @ObservedObject var state: AppState
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        if settings.menuBarShowsTimer && state.isRecording {
+            HStack(spacing: 3) {
+                Image(systemName: state.menuBarSymbol)
+                Text("\(Int(state.bufferedSeconds))s").monospacedDigit()
+            }
+            .accessibilityLabel("Simplex Recorder")
+        } else {
+            Image(systemName: state.menuBarSymbol)
+                .accessibilityLabel("Simplex Recorder")
+        }
+    }
 }

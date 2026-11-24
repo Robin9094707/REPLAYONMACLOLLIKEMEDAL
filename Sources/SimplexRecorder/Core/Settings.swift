@@ -39,12 +39,12 @@ enum ResolutionChoice: String, CaseIterable, Identifiable {
 }
 
 enum CaptureTarget: String, CaseIterable, Identifiable {
-    case gameDisplay, gameWindow, fullDisplay
+    case gameWindow, gameDisplay, fullDisplay
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .gameDisplay: return "Nur das Spiel (ganzer Bildschirm)"
-        case .gameWindow: return "Nur das Spielfenster"
+        case .gameWindow: return "Nur das Spielfenster (empfohlen)"
+        case .gameDisplay: return "Spiel auf dem ganzen Bildschirm"
         case .fullDisplay: return "Kompletter Bildschirm"
         }
     }
@@ -72,6 +72,14 @@ struct KeyCombo: Codable, Equatable {
         keyCode: UInt32(kVK_ANSI_S),
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
         keyLabel: "S")
+    static let defaultLongClip = KeyCombo(
+        keyCode: UInt32(kVK_ANSI_L),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
+        keyLabel: "L")
+    static let defaultScreenshot = KeyCombo(
+        keyCode: UInt32(kVK_ANSI_X),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
+        keyLabel: "X")
     static let defaultPause = KeyCombo(
         keyCode: UInt32(kVK_ANSI_P),
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
@@ -133,6 +141,7 @@ final class AppSettings: ObservableObject {
     }
 
     static let durationOptions = [10, 15, 20, 30, 45, 60, 90, 120, 180, 300]
+    static let longDurationOptions = [60, 90, 120, 180, 300, 600]
     static let clipSounds = ["Glass", "Hero", "Pop", "Tink", "Ping", "Purr", "Submarine", "Funk", "Bottle", "Morse"]
 
     private let d = UserDefaults.standard
@@ -163,6 +172,16 @@ final class AppSettings: ObservableObject {
         static let included = "includedApps"
         static let excluded = "excludedApps"
         static let onboarding = "hasCompletedOnboarding"
+        static let cropTitleBar = "cropTitleBar"
+        static let longClipEnabled = "longClipEnabled"
+        static let longClipDuration = "longClipDuration"
+        static let longClipHotKey = "longClipHotKey"
+        static let screenshotHotKey = "screenshotHotKey"
+        static let showOverlay = "showOverlay"
+        static let copyToClipboard = "copyClipToClipboard"
+        static let revealAfterSave = "revealAfterSave"
+        static let menuBarTimer = "menuBarShowsTimer"
+        static let settingsVersion = "settingsVersion"
     }
 
     @Published var replayDuration: Int { didSet { d.set(replayDuration, forKey: K.replayDuration) } }
@@ -195,6 +214,15 @@ final class AppSettings: ObservableObject {
     @Published var includedApps: [String] { didSet { d.set(includedApps, forKey: K.included) } }
     @Published var excludedApps: [String] { didSet { d.set(excludedApps, forKey: K.excluded) } }
     @Published var hasCompletedOnboarding: Bool { didSet { d.set(hasCompletedOnboarding, forKey: K.onboarding) } }
+    @Published var cropTitleBar: Bool { didSet { d.set(cropTitleBar, forKey: K.cropTitleBar) } }
+    @Published var longClipEnabled: Bool { didSet { d.set(longClipEnabled, forKey: K.longClipEnabled) } }
+    @Published var longClipDuration: Int { didSet { d.set(longClipDuration, forKey: K.longClipDuration) } }
+    @Published var longClipHotKey: KeyCombo { didSet { saveCodable(longClipHotKey, K.longClipHotKey) } }
+    @Published var screenshotHotKey: KeyCombo { didSet { saveCodable(screenshotHotKey, K.screenshotHotKey) } }
+    @Published var showOverlay: Bool { didSet { d.set(showOverlay, forKey: K.showOverlay) } }
+    @Published var copyClipToClipboard: Bool { didSet { d.set(copyClipToClipboard, forKey: K.copyToClipboard) } }
+    @Published var revealAfterSave: Bool { didSet { d.set(revealAfterSave, forKey: K.revealAfterSave) } }
+    @Published var menuBarShowsTimer: Bool { didSet { d.set(menuBarShowsTimer, forKey: K.menuBarTimer) } }
 
     private init() {
         let d = UserDefaults.standard
@@ -207,7 +235,7 @@ final class AppSettings: ObservableObject {
             K.systemAudio: true,
             K.mic: false,
             K.cursor: false,
-            K.target: CaptureTarget.gameDisplay.rawValue,
+            K.target: CaptureTarget.gameWindow.rawValue,
             K.mode: RecordingMode.gamesOnly.rawValue,
             K.folder: AppSettings.defaultSaveFolder.path,
             K.organize: true,
@@ -219,6 +247,13 @@ final class AppSettings: ObservableObject {
             K.keepAlive: true,
             K.paused: false,
             K.onboarding: false,
+            K.cropTitleBar: true,
+            K.longClipEnabled: true,
+            K.longClipDuration: 120,
+            K.showOverlay: true,
+            K.copyToClipboard: false,
+            K.revealAfterSave: false,
+            K.menuBarTimer: false,
         ])
 
         replayDuration = d.integer(forKey: K.replayDuration)
@@ -229,7 +264,7 @@ final class AppSettings: ObservableObject {
         captureSystemAudio = d.bool(forKey: K.systemAudio)
         captureMicrophone = d.bool(forKey: K.mic)
         showCursor = d.bool(forKey: K.cursor)
-        captureTarget = CaptureTarget(rawValue: d.string(forKey: K.target) ?? "") ?? .gameDisplay
+        captureTarget = CaptureTarget(rawValue: d.string(forKey: K.target) ?? "") ?? .gameWindow
         recordingMode = RecordingMode(rawValue: d.string(forKey: K.mode) ?? "") ?? .gamesOnly
         saveFolderPath = d.string(forKey: K.folder) ?? AppSettings.defaultSaveFolder.path
         organizeByGame = d.bool(forKey: K.organize)
@@ -247,6 +282,23 @@ final class AppSettings: ObservableObject {
         includedApps = d.stringArray(forKey: K.included) ?? []
         excludedApps = d.stringArray(forKey: K.excluded) ?? []
         hasCompletedOnboarding = d.bool(forKey: K.onboarding)
+        cropTitleBar = d.bool(forKey: K.cropTitleBar)
+        longClipEnabled = d.bool(forKey: K.longClipEnabled)
+        longClipDuration = d.integer(forKey: K.longClipDuration)
+        longClipHotKey = AppSettings.loadCodable(d, K.longClipHotKey) ?? .defaultLongClip
+        screenshotHotKey = AppSettings.loadCodable(d, K.screenshotHotKey) ?? .defaultScreenshot
+        showOverlay = d.bool(forKey: K.showOverlay)
+        copyClipToClipboard = d.bool(forKey: K.copyToClipboard)
+        revealAfterSave = d.bool(forKey: K.revealAfterSave)
+        menuBarShowsTimer = d.bool(forKey: K.menuBarTimer)
+
+        // Migration: v2 makes "game window only" the default capture mode.
+        if d.integer(forKey: K.settingsVersion) < 2 {
+            captureTarget = .gameWindow
+            d.set(CaptureTarget.gameWindow.rawValue, forKey: K.target)
+            d.set(2, forKey: K.settingsVersion)
+        }
+        if longClipDuration <= 0 { longClipDuration = 120 }
 
         if fps <= 0 { fps = 60 }
         if replayDuration <= 0 { replayDuration = 30 }
@@ -266,8 +318,13 @@ final class AppSettings: ObservableObject {
     }
 
     /// Approximate RAM used by the replay buffer in megabytes.
+    /// Seconds the replay buffer must hold (covers the long-clip hotkey too).
+    var bufferSeconds: Int {
+        max(replayDuration, longClipEnabled ? longClipDuration : 0) + 3
+    }
+
     var estimatedBufferMB: Int {
-        let seconds = Double(replayDuration + 3)
+        let seconds = Double(bufferSeconds)
         let video = bitrateMbps * seconds / 8.0
         let audioChannels = (captureSystemAudio ? 2.0 : 0) + (captureMicrophone ? 1.0 : 0)
         let audio = audioChannels * 48_000 * 4 * seconds / 1_000_000
@@ -299,5 +356,63 @@ final class AppSettings: ObservableObject {
     private static func loadCodable<T: Decodable>(_ d: UserDefaults, _ key: String) -> T? {
         guard let data = d.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
+    }
+}
+
+// MARK: - Quality presets
+
+enum QualityPreset: String, CaseIterable, Identifiable {
+    case efficient, balanced, high, smooth
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .efficient: return "Sparsam"
+        case .balanced: return "Ausgewogen"
+        case .high: return "Maximal"
+        case .smooth: return "Butterweich"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .efficient: return "leaf.fill"
+        case .balanced: return "dial.medium.fill"
+        case .high: return "sparkles"
+        case .smooth: return "hare.fill"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .efficient: return "30 FPS · 1080p · 12 Mbit/s"
+        case .balanced: return "60 FPS · 1440p · 25 Mbit/s"
+        case .high: return "60 FPS · Nativ · 50 Mbit/s"
+        case .smooth: return "120 FPS · 1080p · 40 Mbit/s"
+        }
+    }
+
+    private var values: (fps: Int, resolution: ResolutionChoice, bitrate: Double) {
+        switch self {
+        case .efficient: return (30, .p1080, 12)
+        case .balanced: return (60, .p1440, 25)
+        case .high: return (60, .native, 50)
+        case .smooth: return (120, .p1080, 40)
+        }
+    }
+
+    @MainActor
+    func apply(to settings: AppSettings) {
+        let v = values
+        settings.fps = v.fps
+        settings.resolution = v.resolution
+        settings.bitrateMbps = v.bitrate
+        settings.codec = .hevc
+    }
+
+    @MainActor
+    func isActive(in settings: AppSettings) -> Bool {
+        let v = values
+        return settings.fps == v.fps && settings.resolution == v.resolution && settings.bitrateMbps == v.bitrate
     }
 }

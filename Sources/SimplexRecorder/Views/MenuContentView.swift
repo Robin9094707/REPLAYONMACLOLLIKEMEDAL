@@ -25,6 +25,14 @@ struct MenuContentView: View {
             state.saveClip()
         }
         .disabled(!state.canSaveClip)
+        if settings.longClipEnabled {
+            Button("Langen Clip speichern (\(durationLabel(settings.longClipDuration)))   \(settings.longClipHotKey.displayString)") {
+                state.saveLongClip()
+            }
+            .disabled(!state.canSaveClip)
+        }
+        Button("Screenshot   \(settings.screenshotHotKey.displayString)") { state.takeScreenshot() }
+            .disabled(!state.isRecording)
 
         Picker("Clip-Länge", selection: $settings.replayDuration) {
             ForEach(AppSettings.durationOptions, id: \.self) { seconds in

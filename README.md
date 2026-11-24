@@ -8,7 +8,11 @@ Die App läuft unauffällig in der Menüleiste und nimmt im Hintergrund auf, sob
 | | |
 |---|---|
 | 🎮 **Automatische Spielerkennung** | Minecraft Java (auch über Prism, Lunar, CurseForge …), Steam- und Epic-Spiele, Apps der Kategorie „Spiele“, bekannte Engines. Eigene Regeln: „Immer aufnehmen“ oder „Nie aufnehmen“ |
-| ⌨️ **Globale Tastenkürzel** | Standard: **⌥⇧S** = Clip speichern, **⌥⇧P** = Pause. Frei belegbar, auch F-Tasten. Funktionieren auch im Vollbild |
+| 🪟 **Nur das Spielfenster** | Standard-Modus: Nur das Spielfenster wird aufgenommen, egal wo es liegt oder was darüber ist. Die Titelleiste wird weggeschnitten, Vollbild und Größenänderung laufen ohne Unterbrechung |
+| ⌨️ **Globale Tastenkürzel** | **⌥⇧S** = Clip, **⌥⇧L** = langer Clip (z. B. 2 min), **⌥⇧X** = Screenshot, **⌥⇧P** = Pause. Frei belegbar und auch im Vollbild nutzbar |
+| ✨ **Einblendung im Spiel** | Kleine Einblendung „Clip gespeichert“ über dem Spiel, die selbst nicht aufgenommen wird |
+| 🎚 **Qualitäts-Voreinstellungen** | Sparsam · Ausgewogen · Maximal · Butterweich (120 FPS) |
+| 📋 **Komfort** | Clip automatisch in die Zwischenablage (für Discord), im Finder zeigen, Puffer-Timer in der Menüleiste |
 | ⚡️ **Effizient** | ScreenCaptureKit + Hardware-Encoder (HEVC/H.264). Der Puffer liegt im RAM, die SSD wird nicht dauerhaft beschrieben. Ohne laufendes Spiel wird nichts aufgenommen |
 | 💾 **Speicherort frei wählbar** | z. B. die externe Festplatte, mit Speicheranzeige (Clips / andere Daten / frei). Optional automatisches Aufräumen alter Clips |
 | 🔁 **Bleibt aktiv** | Autostart beim Anmelden. Egal ob ⌘Q, „Sofort beenden“ oder Absturz: launchd startet die App nach wenigen Sekunden neu. Nur „Simplex Recorder beenden“ im eigenen Menü stoppt sie bis zur nächsten Anmeldung |

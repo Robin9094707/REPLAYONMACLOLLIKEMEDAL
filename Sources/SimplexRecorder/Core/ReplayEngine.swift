@@ -13,6 +13,7 @@ struct CaptureConfig: Equatable {
     var captureMicrophone: Bool
     var showCursor: Bool
     var target: CaptureTarget
+    var cropTitleBar: Bool
 }
 
 enum ReplayEngineError: LocalizedError {
@@ -55,6 +56,15 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     private var _isRunning = false
 
     private(set) var outputSize: CGSize = .zero
+    /// Current video filter/config – reused for screenshots and live window updates.
+    private var videoFilter: SCContentFilter?
+    private var videoConfig: SCStreamConfiguration?
+    private var windowMode = false
+    private var windowCrop = false
+    private var displayPointSize: CGSize = .zero
+    private var lastWindowSize: CGSize = .zero
+    /// Title bar height of a standard macOS window in points.
+    private static let titleBarHeight: CGFloat = 28
     var onUnexpectedStop: ((Error) -> Void)?
 
     var isRunning: Bool {
@@ -73,33 +83,49 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         guard !content.displays.isEmpty else { throw ReplayEngineError.noDisplay }
 
         var mainWindow: SCWindow?
-        if let pid = game?.pid {
-            mainWindow = content.windows
-                .filter { $0.owningApplication?.processID == pid && $0.windowLayer == 0 && $0.frame.width >= 100 && $0.frame.height >= 100 }
-                .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+        if let game {
+            let candidates = content.windows.filter {
+                $0.owningApplication?.processID == game.pid && $0.windowLayer == 0
+                    && $0.frame.width >= 100 && $0.frame.height >= 100
+            }
+            mainWindow = candidates.first { game.windowID != 0 && $0.windowID == game.windowID }
+                ?? candidates.max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
         }
         let display = Self.display(for: mainWindow?.frame, in: content.displays)
+        let displayScale = CGFloat(SCContentFilter(display: display, excludingWindows: []).pointPixelScale)
 
         let filter: SCContentFilter
-        let pointSize: CGSize
         let gameApp = game.flatMap { g in content.applications.first { $0.processID == g.pid } }
+        var width: Int
+        var height: Int
+        var sourceRect: CGRect?
+        windowMode = false
 
         if config.target == .gameWindow, let window = mainWindow {
+            // Only the game window, independent of where it sits on screen. The output is a
+            // fixed canvas with the display's aspect ratio: fullscreen fills it exactly,
+            // smaller windows are scaled up (letterboxed if the aspect differs). Resizing the
+            // window never restarts the capture, so the replay buffer stays intact.
             filter = SCContentFilter(desktopIndependentWindow: window)
-            pointSize = window.frame.size
+            windowMode = true
+            windowCrop = config.cropTitleBar
+            displayPointSize = display.frame.size
+            lastWindowSize = window.frame.size
+            width = Int((display.frame.width * displayScale).rounded())
+            height = Int((display.frame.height * displayScale).rounded())
+            sourceRect = cropRect(for: window.frame.size)
         } else if config.target != .fullDisplay, let app = gameApp {
             filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
-            pointSize = display.frame.size
+            width = Int((display.frame.width * displayScale).rounded())
+            height = Int((display.frame.height * displayScale).rounded())
         } else {
             let ownPID = ProcessInfo.processInfo.processIdentifier
             let own = content.applications.filter { $0.processID == ownPID }
             filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
-            pointSize = display.frame.size
+            width = Int((display.frame.width * displayScale).rounded())
+            height = Int((display.frame.height * displayScale).rounded())
         }
 
-        let scale = CGFloat(filter.pointPixelScale)
-        var width = Int((pointSize.width * scale).rounded())
-        var height = Int((pointSize.height * scale).rounded())
         if let maxHeight = config.maxHeight, height > maxHeight {
             width = Int((Double(width) * Double(maxHeight) / Double(height)).rounded())
             height = maxHeight
@@ -117,7 +143,8 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         let encoder = try makeEncoder(width: width, height: height, fps: fps, config: config)
 
         do {
-            try await startStream(filter: filter, width: width, height: height, fps: fps, config: config)
+            try await startStream(filter: filter, width: width, height: height, fps: fps,
+                                  config: config, sourceRect: sourceRect)
         } catch {
             VTCompressionSessionInvalidate(encoder)
             throw error
@@ -129,7 +156,7 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
             self.audioPackets = 0
             self.audioPeak = 0
         }
-        DiagnosticsLog.write("video stream started \(width)x\(height) @\(fps)fps target=\(config.target.rawValue) game=\(game?.name ?? "-")")
+        DiagnosticsLog.write("video stream started \(width)x\(height) @\(fps)fps target=\(config.target.rawValue) window=\(mainWindow.map { "\($0.windowID) \(Int($0.frame.width))x\(Int($0.frame.height))" } ?? "-") crop=\(sourceRect.map { "\($0)" } ?? "none") game=\(game?.name ?? "-")")
         if config.captureSystemAudio || config.captureMicrophone {
             let ownPID = ProcessInfo.processInfo.processIdentifier
             let own = content.applications.filter { $0.processID == ownPID }
@@ -156,7 +183,7 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private func startStream(filter: SCContentFilter, width: Int, height: Int, fps: Int,
-                             config: CaptureConfig) async throws {
+                             config: CaptureConfig, sourceRect: CGRect?) async throws {
         let sc = SCStreamConfiguration()
         sc.width = width
         sc.height = height
@@ -165,12 +192,79 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         sc.queueDepth = 6
         sc.showsCursor = config.showCursor
         sc.scalesToFit = true
+        sc.preservesAspectRatio = true
+        sc.backgroundColor = .black
         sc.capturesAudio = false
+        if let sourceRect { sc.sourceRect = sourceRect }
 
         let stream = SCStream(filter: filter, configuration: sc, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: videoQueue)
         try await stream.startCapture()
         self.scStream = stream
+        self.videoFilter = filter
+        self.videoConfig = sc
+    }
+
+    /// Window crop (title bar removed), in window-local points. Nil = whole window.
+    private func cropRect(for windowSize: CGSize) -> CGRect? {
+        guard windowMode, windowCrop else { return nil }
+        // Fullscreen windows have no title bar.
+        let isFullscreen = windowSize.width >= displayPointSize.width - 1
+            && windowSize.height >= displayPointSize.height - 1
+        guard !isFullscreen, windowSize.height > Self.titleBarHeight * 3 else { return nil }
+        return CGRect(x: 0, y: Self.titleBarHeight,
+                      width: windowSize.width, height: windowSize.height - Self.titleBarHeight)
+    }
+
+    /// Called when the game window was resized or toggled fullscreen: adjusts the crop
+    /// live, without restarting the stream.
+    func updateWindowGeometry(size: CGSize) async {
+        guard windowMode, isRunning, let stream = scStream, let current = videoConfig,
+              abs(size.width - lastWindowSize.width) > 2 || abs(size.height - lastWindowSize.height) > 2 else { return }
+        lastWindowSize = size
+        guard windowCrop else { return }
+        let sc = Self.copy(current)
+        sc.sourceRect = cropRect(for: size) ?? CGRect(origin: .zero, size: size)
+        do {
+            try await stream.updateConfiguration(sc)
+            videoConfig = sc
+            DiagnosticsLog.write("window resized to \(Int(size.width))x\(Int(size.height)) – crop updated")
+        } catch {
+            DiagnosticsLog.write("updateConfiguration failed: \(error)")
+        }
+    }
+
+    /// Full-resolution still of what is currently captured.
+    func screenshot() async throws -> CGImage {
+        guard let filter = videoFilter, let current = videoConfig else { throw ReplayEngineError.noDisplay }
+        let sc = Self.copy(current)
+        sc.pixelFormat = kCVPixelFormatType_32BGRA
+        sc.showsCursor = current.showsCursor
+        if windowMode {
+            // Native window resolution instead of the (letterboxed) video canvas.
+            let crop = cropRect(for: lastWindowSize)
+            let size = crop?.size ?? lastWindowSize
+            let scale = CGFloat(filter.pointPixelScale)
+            sc.width = max(64, Int(size.width * scale))
+            sc.height = max(64, Int(size.height * scale))
+        }
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: sc)
+    }
+
+    private static func copy(_ c: SCStreamConfiguration) -> SCStreamConfiguration {
+        let sc = SCStreamConfiguration()
+        sc.width = c.width
+        sc.height = c.height
+        sc.minimumFrameInterval = c.minimumFrameInterval
+        sc.pixelFormat = c.pixelFormat
+        sc.queueDepth = c.queueDepth
+        sc.showsCursor = c.showsCursor
+        sc.scalesToFit = c.scalesToFit
+        sc.preservesAspectRatio = c.preservesAspectRatio
+        sc.backgroundColor = c.backgroundColor
+        sc.capturesAudio = c.capturesAudio
+        sc.sourceRect = c.sourceRect
+        return sc
     }
 
     private func startAudioStream(filter: SCContentFilter, config: CaptureConfig, includeMicrophone: Bool) async throws {
@@ -244,6 +338,8 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         scStream = nil
         audioStream = nil
+        videoFilter = nil
+        videoConfig = nil
         teardownEncoder()
     }
 

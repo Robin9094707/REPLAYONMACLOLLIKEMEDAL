@@ -62,7 +62,11 @@ struct GeneralSettingsView: View {
                         NSSound(named: NSSound.Name(newValue))?.play()
                     }
                 }
-                Toggle("Mitteilung anzeigen", isOn: $settings.showNotifications)
+                Toggle("Einblendung im Spiel („Clip gespeichert“)", isOn: $settings.showOverlay)
+                Toggle("Mitteilung in der Mitteilungszentrale", isOn: $settings.showNotifications)
+                Toggle("Clip automatisch in die Zwischenablage kopieren (zum Einfügen in Discord)", isOn: $settings.copyClipToClipboard)
+                Toggle("Clip nach dem Speichern im Finder zeigen", isOn: $settings.revealAfterSave)
+                Toggle("Puffer-Sekunden neben dem Menüleisten-Symbol anzeigen", isOn: $settings.menuBarShowsTimer)
             }
 
             Section {
@@ -148,9 +152,43 @@ struct RecordingSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Schnellauswahl") {
+                HStack(spacing: 10) {
+                    ForEach(QualityPreset.allCases) { preset in
+                        PresetCard(preset: preset, active: preset.isActive(in: settings)) {
+                            withAnimation { preset.apply(to: settings) }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section {
+                Picker("Aufnahmebereich", selection: $settings.captureTarget) {
+                    ForEach(CaptureTarget.allCases) { Text($0.title).tag($0) }
+                }
+                if settings.captureTarget == .gameWindow {
+                    Toggle("Fenster-Titelleiste wegschneiden", isOn: $settings.cropTitleBar)
+                }
+                Toggle("Mauszeiger aufnehmen", isOn: $settings.showCursor)
+            } header: {
+                Text("Was wird aufgenommen?")
+            } footer: {
+                Text(settings.captureTarget == .gameWindow
+                     ? "Nur das Spielfenster – egal wo es liegt oder ob andere Fenster darüber sind. Das Video hat immer das Format deines Bildschirms: Im Vollbild passt es exakt, kleinere Fenster werden hochskaliert. Fenstergröße ändern oder Vollbild umschalten unterbricht die Aufnahme nicht."
+                     : "Es wird der Bildschirm aufgenommen, auf dem das Spiel läuft.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("Clip-Länge", selection: $settings.replayDuration) {
                     ForEach(AppSettings.durationOptions, id: \.self) { Text(durationLabel($0)).tag($0) }
+                }
+                Toggle("Langer Clip per eigenem Tastenkürzel (\(settings.longClipHotKey.displayString))", isOn: $settings.longClipEnabled)
+                if settings.longClipEnabled {
+                    Picker("Länge des langen Clips", selection: $settings.longClipDuration) {
+                        ForEach(AppSettings.longDurationOptions, id: \.self) { Text(durationLabel($0)).tag($0) }
+                    }
                 }
                 LabeledContent("Benötigter Arbeitsspeicher", value: "ca. \(settings.estimatedBufferMB) MB")
             } header: {
@@ -181,10 +219,6 @@ struct RecordingSettingsView: View {
                             .frame(width: 80, alignment: .trailing)
                     }
                 }
-                Picker("Aufnahmebereich", selection: $settings.captureTarget) {
-                    ForEach(CaptureTarget.allCases) { Text($0.title).tag($0) }
-                }
-                Toggle("Mauszeiger aufnehmen", isOn: $settings.showCursor)
             }
 
             Section {
@@ -229,6 +263,11 @@ struct HotKeySettingsView: View {
         Form {
             Section {
                 LabeledContent("Clip speichern") { HotKeyRecorder(combo: $settings.clipHotKey) }
+                LabeledContent("Langen Clip speichern (\(durationLabel(settings.longClipDuration)))") {
+                    HotKeyRecorder(combo: $settings.longClipHotKey)
+                }
+                .disabled(!settings.longClipEnabled)
+                LabeledContent("Screenshot") { HotKeyRecorder(combo: $settings.screenshotHotKey) }
                 LabeledContent("Aufnahme pausieren / fortsetzen") { HotKeyRecorder(combo: $settings.pauseHotKey) }
             } header: {
                 Text("Globale Tastenkürzel")
@@ -241,6 +280,8 @@ struct HotKeySettingsView: View {
                 Button("Auf Standard zurücksetzen") {
                     settings.clipHotKey = .defaultClip
                     settings.pauseHotKey = .defaultPause
+                    settings.longClipHotKey = .defaultLongClip
+                    settings.screenshotHotKey = .defaultScreenshot
                     AppState.shared.registerHotKeys()
                 }
             } footer: {
@@ -522,5 +563,39 @@ struct BackgroundServiceRow: View {
         if active { return "Wird von macOS überwacht und automatisch neu gestartet." }
         if settings.wantsLaunchAgent { return "Klicke auf „Reparieren“ – die App startet kurz neu. Protokoll: ~/Library/Logs/SimplexRecorder/agent.log" }
         return "Autostart und Neustart sind ausgeschaltet."
+    }
+}
+
+// MARK: - Preset card
+
+struct PresetCard: View {
+    let preset: QualityPreset
+    let active: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: preset.symbol)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(active ? Color.white : Color.accentColor)
+                Text(preset.title).font(.system(size: 12, weight: .semibold))
+                Text(preset.detail)
+                    .font(.system(size: 9))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(active ? Color.white.opacity(0.85) : Color.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 82)
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(active ? Color.accentColor : Color.secondary.opacity(hovering ? 0.16 : 0.08))
+            )
+            .foregroundStyle(active ? Color.white : Color.primary)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
