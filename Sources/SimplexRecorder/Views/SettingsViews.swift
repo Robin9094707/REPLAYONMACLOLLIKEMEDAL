@@ -73,11 +73,15 @@ struct GeneralSettingsView: View {
                     if !Permissions.requestScreenRecording() { Permissions.openScreenRecordingSettings() }
                 }
                 if !screenGranted {
-                    HStack {
-                        Text("Nach dem Erlauben muss die App einmal neu starten.")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Schalter ist an, aber die App sagt trotzdem „fehlt“? Dann gehört der Eintrag noch zu einer älteren Version. „Zurücksetzen“ löscht ihn – danach einfach erneut erlauben.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("App neu starten") { LaunchAgentManager.relaunch() }
+                        HStack {
+                            Button("Berechtigung zurücksetzen & neu erlauben") { Permissions.repairScreenRecording() }
+                                .buttonStyle(.borderedProminent)
+                            Spacer()
+                            Button("App neu starten") { LaunchAgentManager.relaunch() }
+                        }
                     }
                 }
                 PermissionRow(title: "Mitteilungen",
@@ -108,6 +112,9 @@ struct GeneralSettingsView: View {
 
     private func refreshPermissions() {
         screenGranted = Permissions.hasScreenRecording
+        if !screenGranted {
+            Task { if await Permissions.probeScreenRecording() { screenGranted = true } }
+        }
         micStatus = Permissions.microphoneStatus
         Permissions.notificationsAuthorized { notificationsGranted = $0 }
     }

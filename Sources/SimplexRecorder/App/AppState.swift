@@ -54,6 +54,7 @@ final class AppState: ObservableObject {
         launched = true
 
         NotificationManager.shared.setup()
+        handleUpdatedBuild()
         engine.buffer.maxSeconds = Double(settings.replayDuration) + 3
         engine.onUnexpectedStop = { [weak self] error in
             Task { @MainActor in self?.handleUnexpectedStop(error) }
@@ -81,6 +82,26 @@ final class AppState: ObservableObject {
         lastFolderPath = settings.saveFolderPath
         refreshLibrary()
         scheduleReevaluate()
+    }
+
+    /// After an update the old privacy entry belongs to the previous (differently signed)
+    /// build. Clear it once so macOS asks again for this build.
+    private func handleUpdatedBuild() {
+        let defaults = UserDefaults.standard
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+        let previous = defaults.string(forKey: "lastLaunchedBuild")
+        defaults.set(build, forKey: "lastLaunchedBuild")
+        guard let previous, previous != build, settings.hasCompletedOnboarding else { return }
+        Task { @MainActor in
+            if await Permissions.probeScreenRecording() { return }
+            Permissions.resetScreenRecordingPermission()
+            Permissions.requestScreenRecording()
+            if settings.showNotifications {
+                NotificationManager.shared.notify(
+                    title: "Bitte Bildschirmaufnahme erneut erlauben",
+                    body: "Nach einem Update fragt macOS einmal neu. Simplex Recorder startet die Aufnahme automatisch, sobald du zustimmst.")
+            }
+        }
     }
 
     func refreshLibrary() {
@@ -111,7 +132,7 @@ final class AppState: ObservableObject {
         let mb = engine.buffer.approximateBytes / 1_000_000
         if mb != bufferMB { bufferMB = mb }
         // Re-check permission state cheaply while waiting for it.
-        if status == .needsPermission, Permissions.hasScreenRecording { scheduleReevaluate() }
+        if status == .needsPermission, tickCount % 3 == 0 { scheduleReevaluate() }
     }
 
     // MARK: Capture state machine
@@ -125,7 +146,9 @@ final class AppState: ObservableObject {
     }
 
     private func applyDesiredState() async {
-        guard Permissions.hasScreenRecording else {
+        var permitted = Permissions.hasScreenRecording
+        if !permitted { permitted = await Permissions.probeScreenRecording() }
+        guard permitted else {
             await stopEngine()
             status = .needsPermission
             return

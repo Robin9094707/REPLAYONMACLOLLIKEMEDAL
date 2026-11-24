@@ -46,7 +46,12 @@ struct OnboardingView: View {
             .padding(16)
         }
         .frame(width: 620, height: 560)
-        .onReceive(timer) { _ in screenGranted = Permissions.hasScreenRecording }
+        .onReceive(timer) { _ in
+            screenGranted = Permissions.hasScreenRecording
+            if !screenGranted, step == 1 {
+                Task { if await Permissions.probeScreenRecording() { screenGranted = true } }
+            }
+        }
         .onAppear {
             externalVolumes = StorageMonitor.externalVolumes()
             Permissions.notificationsAuthorized { notificationsGranted = $0 }
@@ -93,6 +98,9 @@ struct OnboardingView: View {
                     .controlSize(.large)
                     Button("Systemeinstellungen öffnen") { Permissions.openScreenRecordingSettings() }
                         .controlSize(.large)
+                    Button("Zurücksetzen") { Permissions.repairScreenRecording() }
+                        .controlSize(.large)
+                        .help("Löscht einen alten Eintrag einer früheren Version und fragt neu")
                 }
                 Text("Wenn du den Schalter aktiviert hast, aber hier noch nichts passiert: macOS verlangt einen Neustart der App. Klicke dann einfach auf „Fertig“ am Ende – die App startet dabei ohnehin neu.")
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
