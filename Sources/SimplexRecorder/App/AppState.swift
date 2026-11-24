@@ -20,6 +20,7 @@ final class AppState: ObservableObject {
     @Published private(set) var isSaving = false
     @Published private(set) var bufferedSeconds: Double = 0
     @Published private(set) var bufferMB: Int = 0
+    @Published private(set) var audioBufferedSeconds: Double = 0
     @Published private(set) var lastSavedClip: URL?
 
     let settings: AppSettings
@@ -129,6 +130,8 @@ final class AppState: ObservableObject {
         let seconds = engine.isRunning ? engine.buffer.bufferedSeconds : 0
         let rounded = min(seconds, Double(settings.replayDuration)).rounded()
         if rounded != bufferedSeconds { bufferedSeconds = rounded }
+        let audio = engine.isRunning ? min(engine.buffer.audioSeconds, Double(settings.replayDuration)).rounded() : 0
+        if audio != audioBufferedSeconds { audioBufferedSeconds = audio }
         let mb = engine.buffer.approximateBytes / 1_000_000
         if mb != bufferMB { bufferMB = mb }
         // Re-check permission state cheaply while waiting for it.
@@ -264,6 +267,8 @@ final class AppState: ObservableObject {
             return
         }
 
+        let expectedAudio = settings.captureSystemAudio
+        let hasAudio = !snapshot.audio.isEmpty
         let gameName = activeGameName ?? "Clip"
         let destination: URL
         do {
@@ -284,12 +289,13 @@ final class AppState: ObservableObject {
                 ClipLibrary.enforceLimit(folder: folder, maxBytes: maxBytes)
             }
             Task { @MainActor in
-                AppState.shared.finishSaving(result: result, url: destination, gameName: gameName)
+                AppState.shared.finishSaving(result: result, url: destination, gameName: gameName,
+                                             missingAudio: expectedAudio && !hasAudio)
             }
         }
     }
 
-    private func finishSaving(result: Result<Double, Error>, url: URL, gameName: String) {
+    private func finishSaving(result: Result<Double, Error>, url: URL, gameName: String, missingAudio: Bool) {
         isSaving = false
         switch result {
         case .success(let seconds):
@@ -297,7 +303,7 @@ final class AppState: ObservableObject {
             if settings.playSound { NSSound(named: NSSound.Name(settings.clipSound))?.play() }
             if settings.showNotifications {
                 NotificationManager.shared.notify(title: "Clip gespeichert 🎬",
-                                                  body: "\(gameName) · \(Int(seconds.rounded())) Sekunden – klicken zum Anzeigen",
+                                                  body: "\(gameName) · \(Int(seconds.rounded())) Sekunden\(missingAudio ? " · ohne Ton (kein Systemton empfangen)" : "") – klicken zum Anzeigen",
                                                   fileURL: url)
             }
         case .failure(let error):

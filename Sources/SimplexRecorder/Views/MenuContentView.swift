@@ -12,6 +12,11 @@ struct MenuContentView: View {
         Text(state.statusLine)
         if state.isRecording {
             Text("Puffer: \(Int(state.bufferedSeconds)) von \(settings.replayDuration) s · \(state.bufferMB) MB RAM")
+            if settings.captureSystemAudio {
+                Text(state.audioBufferedSeconds > 0
+                     ? "Ton: \(Int(state.audioBufferedSeconds)) s im Puffer"
+                     : "Ton: noch kein Systemton empfangen")
+            }
         }
 
         Divider()

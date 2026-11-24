@@ -33,6 +33,12 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     let buffer = ReplayBuffer()
 
     private var scStream: SCStream?
+    /// Separate audio-only stream for the *whole* system sound (excluding this app).
+    /// Per-app audio attribution is unreliable for games launched through launchers
+    /// (e.g. Minecraft Java runs in a `java` child process of the launcher).
+    private var audioStream: SCStream?
+    private var audioOffset: CMTime?
+    private var micOffset: CMTime?
     private var encoder: VTCompressionSession?
     private let videoQueue = DispatchQueue(label: "com.simplex.recorder.video", qos: .userInteractive)
     private let audioQueue = DispatchQueue(label: "com.simplex.recorder.audio", qos: .userInitiated)
@@ -103,20 +109,28 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         let encoder = try makeEncoder(width: width, height: height, fps: fps, config: config)
 
         do {
-            try await startStream(filter: filter, width: width, height: height, fps: fps,
-                                  config: config, includeMicrophone: config.captureMicrophone)
-        } catch where config.captureMicrophone {
-            // Microphone permission missing or device busy – retry without it.
-            do {
-                try await startStream(filter: filter, width: width, height: height, fps: fps,
-                                      config: config, includeMicrophone: false)
-            } catch {
-                VTCompressionSessionInvalidate(encoder)
-                throw error
-            }
+            try await startStream(filter: filter, width: width, height: height, fps: fps, config: config)
         } catch {
             VTCompressionSessionInvalidate(encoder)
             throw error
+        }
+
+        audioQueue.sync {
+            self.audioOffset = nil
+            self.micOffset = nil
+        }
+        if config.captureSystemAudio || config.captureMicrophone {
+            let ownPID = ProcessInfo.processInfo.processIdentifier
+            let own = content.applications.filter { $0.processID == ownPID }
+            let audioFilter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
+            do {
+                try await startAudioStream(filter: audioFilter, config: config, includeMicrophone: config.captureMicrophone)
+            } catch where config.captureMicrophone {
+                // Microphone permission missing or device busy – retry without it.
+                try? await startAudioStream(filter: audioFilter, config: config, includeMicrophone: false)
+            } catch {
+                NSLog("SimplexRecorder: audio stream failed: \(error)")
+            }
         }
 
         videoQueue.sync { self.encoder = encoder }
@@ -125,7 +139,7 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private func startStream(filter: SCContentFilter, width: Int, height: Int, fps: Int,
-                             config: CaptureConfig, includeMicrophone: Bool) async throws {
+                             config: CaptureConfig) async throws {
         let sc = SCStreamConfiguration()
         sc.width = width
         sc.height = height
@@ -134,6 +148,22 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         sc.queueDepth = 6
         sc.showsCursor = config.showCursor
         sc.scalesToFit = true
+        sc.capturesAudio = false
+
+        let stream = SCStream(filter: filter, configuration: sc, delegate: self)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: videoQueue)
+        try await stream.startCapture()
+        self.scStream = stream
+    }
+
+    private func startAudioStream(filter: SCContentFilter, config: CaptureConfig, includeMicrophone: Bool) async throws {
+        let sc = SCStreamConfiguration()
+        // Video is required by ScreenCaptureKit but unused here – keep it as tiny as possible.
+        sc.width = 32
+        sc.height = 32
+        sc.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        sc.queueDepth = 3
+        sc.showsCursor = false
         sc.capturesAudio = config.captureSystemAudio
         sc.sampleRate = 48_000
         sc.channelCount = 2
@@ -141,9 +171,9 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         if #available(macOS 15.0, *) {
             sc.captureMicrophone = includeMicrophone
         }
-
         let stream = SCStream(filter: filter, configuration: sc, delegate: self)
-        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: videoQueue)
+        // A screen output avoids "output not found" log spam; its frames are ignored.
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: audioQueue)
         if config.captureSystemAudio {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue)
         }
@@ -151,7 +181,7 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
             try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: audioQueue)
         }
         try await stream.startCapture()
-        self.scStream = stream
+        self.audioStream = stream
     }
 
     func stop() async {
@@ -159,7 +189,11 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         if let stream = scStream {
             try? await stream.stopCapture()
         }
+        if let stream = audioStream {
+            try? await stream.stopCapture()
+        }
         scStream = nil
+        audioStream = nil
         teardownEncoder()
     }
 
@@ -213,12 +247,32 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard sampleBuffer.isValid else { return }
         if type == .screen {
+            if stream === audioStream { return }
             handleVideo(sampleBuffer)
         } else if type == .audio {
-            buffer.appendAudio(sampleBuffer)
+            if let fixed = alignedToHostClock(sampleBuffer, offset: &audioOffset) {
+                buffer.appendAudio(fixed)
+            }
         } else if #available(macOS 15.0, *), type == .microphone {
-            buffer.appendMicrophone(sampleBuffer)
+            if let fixed = alignedToHostClock(sampleBuffer, offset: &micOffset) {
+                buffer.appendMicrophone(fixed)
+            }
         }
+    }
+
+    /// Video timestamps are on the host clock. Should an audio stream use a different
+    /// timebase, shift it once so both line up (measured on the first sample).
+    private func alignedToHostClock(_ sample: CMSampleBuffer, offset: inout CMTime?) -> CMSampleBuffer? {
+        if offset == nil {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            let diff = CMTimeSubtract(now, sample.presentationTimeStamp)
+            offset = abs(diff.seconds) > 1.0 ? diff : .zero
+            if offset != .zero {
+                NSLog("SimplexRecorder: audio clock offset \(diff.seconds)s – correcting")
+            }
+        }
+        guard let value = offset, value != .zero else { return sample }
+        return ClipExporter.retimed(sample, offset: value)
     }
 
     private func handleVideo(_ sampleBuffer: CMSampleBuffer) {
@@ -247,8 +301,18 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     // MARK: SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        if stream === audioStream {
+            // Losing audio is not fatal – the video keeps running.
+            NSLog("SimplexRecorder: audio stream stopped: \(error)")
+            audioStream = nil
+            return
+        }
         let wasRunning = isRunning
         setRunning(false)
+        if let audio = audioStream {
+            audioStream = nil
+            Task { try? await audio.stopCapture() }
+        }
         videoQueue.async {
             if let encoder = self.encoder {
                 VTCompressionSessionInvalidate(encoder)

@@ -160,7 +160,7 @@ enum ClipExporter {
         return samples.compactMap { retimed($0, offset: offset) }
     }
 
-    private static func retimed(_ sample: CMSampleBuffer, offset: CMTime) -> CMSampleBuffer? {
+    static func retimed(_ sample: CMSampleBuffer, offset: CMTime) -> CMSampleBuffer? {
         var count: CMItemCount = 0
         CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count)
         guard count > 0 else { return sample }

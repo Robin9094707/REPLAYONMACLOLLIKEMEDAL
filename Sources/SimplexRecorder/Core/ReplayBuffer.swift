@@ -32,6 +32,14 @@ final class ReplayBuffer {
         }
     }
 
+    /// Seconds of system audio currently buffered (diagnostics).
+    var audioSeconds: Double {
+        locked {
+            guard let first = audio.first, let last = audio.last else { return 0 }
+            return max(0, last.presentationTimeStamp.seconds - first.presentationTimeStamp.seconds)
+        }
+    }
+
     var approximateBytes: Int {
         locked {
             let audioBytes = (audio.count + mic.count) * 8_192
@@ -107,10 +115,8 @@ final class ReplayBuffer {
     private func trimAudioLocked() {
         let latestAudio = max(audio.last?.presentationTimeStamp.seconds ?? 0,
                               mic.last?.presentationTimeStamp.seconds ?? 0)
-        var cutoff = latestAudio - _maxSeconds - 2
-        if let firstVideo = video.first?.presentationTimeStamp.seconds {
-            cutoff = max(cutoff, firstVideo - 1)
-        }
+        // Trim on the audio's own timeline only – never relative to video timestamps.
+        let cutoff = latestAudio - _maxSeconds - 2
         if let index = audio.firstIndex(where: { $0.presentationTimeStamp.seconds >= cutoff }) {
             if index > 0 { audio.removeFirst(index) }
         } else {
