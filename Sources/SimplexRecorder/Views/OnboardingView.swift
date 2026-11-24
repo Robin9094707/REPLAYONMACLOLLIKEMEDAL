@@ -169,7 +169,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Beim Anmelden automatisch starten", isOn: $settings.launchAtLogin)
-                Toggle("Nach Absturz oder „Sofort beenden“ automatisch neu starten", isOn: $settings.keepAlive)
+                Toggle("Automatisch neu starten, wenn die App beendet wird oder abstürzt", isOn: $settings.keepAlive)
             }
             .toggleStyle(.switch)
             .padding()
@@ -182,7 +182,7 @@ struct OnboardingView: View {
             }
             .padding(.horizontal)
 
-            if LaunchAgentManager.isTranslocated {
+            if !LaunchAgentManager.isInstalledLocationValid {
                 Label("Tipp: Verschiebe die App zuerst in den Ordner „Programme“ und öffne sie von dort – sonst kann macOS den Autostart nicht einrichten.",
                       systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange).font(.caption)
@@ -214,7 +214,7 @@ struct OnboardingView: View {
         try? FileManager.default.createDirectory(at: settings.saveFolderURL, withIntermediateDirectories: true)
         WindowManager.shared.closeOnboarding()
         // Restart under launchd (autostart / keep-alive) – also picks up a freshly granted permission.
-        if (settings.wantsLaunchAgent && !LaunchAgentManager.isTranslocated) || !Permissions.hasScreenRecording {
+        if (settings.wantsLaunchAgent && LaunchAgentManager.isInstalledLocationValid) || !Permissions.hasScreenRecording {
             LaunchAgentManager.applyAndRelaunch(runAtLoad: settings.launchAtLogin, keepAlive: settings.keepAlive)
         }
         AppState.shared.refreshLibrary()

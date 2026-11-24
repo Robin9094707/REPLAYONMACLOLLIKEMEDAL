@@ -11,7 +11,7 @@ Die App läuft unauffällig in der Menüleiste und nimmt im Hintergrund auf, sob
 | ⌨️ **Globale Tastenkürzel** | Standard: **⌥⇧S** = Clip speichern, **⌥⇧P** = Pause. Frei belegbar, auch F-Tasten. Funktionieren auch im Vollbild |
 | ⚡️ **Effizient** | ScreenCaptureKit + Hardware-Encoder (HEVC/H.264). Der Puffer liegt im RAM, die SSD wird nicht dauerhaft beschrieben. Ohne laufendes Spiel wird nichts aufgenommen |
 | 💾 **Speicherort frei wählbar** | z. B. die externe Festplatte, mit Speicheranzeige (Clips / andere Daten / frei). Optional automatisches Aufräumen alter Clips |
-| 🔁 **Bleibt aktiv** | Autostart beim Anmelden. Nach einem Absturz oder „Sofort beenden“ startet launchd die App automatisch neu. Über „Beenden“ im Menü bleibt sie aus |
+| 🔁 **Bleibt aktiv** | Autostart beim Anmelden. Egal ob ⌘Q, „Sofort beenden“ oder Absturz: launchd startet die App nach wenigen Sekunden neu. Nur „Simplex Recorder beenden“ im eigenen Menü stoppt sie bis zur nächsten Anmeldung |
 | ⏸ **Ruhemodus** | Pausieren für 15 Min., 1 Std., 3 Std. oder unbegrenzt |
 | 🔊 **Audio** | Spiel- und Systemton, optional Mikrofon (ab macOS 15) |
 | 🎞 **Clip-Galerie** | Vorschaubilder, Filter nach Spiel, Drag & Drop in Discord, Kopieren, Papierkorb |
@@ -49,8 +49,8 @@ git tag v1.0.0 && git push origin v1.0.0
 
 - **GameDetector**: prüft alle 3 Sekunden die Fensterliste (sehr günstig) und reagiert zusätzlich sofort auf App-Start und App-Wechsel.
 - **ReplayEngine**: ScreenCaptureKit → VideoToolbox-Hardware-Encoder → Ringpuffer im RAM (1 Keyframe pro Sekunde).
-- **ClipExporter**: Video wird ohne Neukodierung in eine `.mp4` kopiert und ist damit sofort fertig. Audio wird zu AAC kodiert.
-- **LaunchAgent** (`~/Library/LaunchAgents/com.simplex.recorder.agent.plist`): `RunAtLoad` für den Autostart, `KeepAlive.SuccessfulExit = false` für den Neustart nach einem Absturz oder Zwangsbeenden.
+- **ClipExporter**: Jede Spur wird parallel geschrieben. Video wird ohne Neukodierung in eine `.mp4` kopiert und ist damit sofort fertig. Audio wird zu AAC kodiert.
+- **LaunchAgent** (`~/Library/LaunchAgents/com.simplex.recorder.agent.plist`): `RunAtLoad` für den Autostart, `KeepAlive = true` für den Neustart nach jedem Beenden. Protokoll: `~/Library/Logs/SimplexRecorder/agent.log`.
 
 ### Komplett entfernen
 

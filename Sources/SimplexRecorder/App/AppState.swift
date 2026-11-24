@@ -354,14 +354,13 @@ final class AppState: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Simplex Recorder beenden?"
-        alert.informativeText = "Solange die App beendet ist, werden keine Clips aufgenommen. Du kannst die Aufnahme stattdessen auch nur pausieren."
+        alert.informativeText = "Die App bleibt bis zur nächsten Anmeldung aus und nimmt solange keine Clips auf. Du kannst die Aufnahme stattdessen auch nur pausieren."
         alert.addButton(withTitle: "Beenden")
         alert.addButton(withTitle: "Nur pausieren")
         alert.addButton(withTitle: "Abbrechen")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            UserDefaults.standard.synchronize()
-            NSApp.terminate(nil)
+            LaunchAgentManager.quitForReal()
         case .alertSecondButtonReturn:
             pause(minutes: nil)
         default:

@@ -53,6 +53,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if LaunchAgentManager.isLaunchedByAgent {
             // We are the supervised instance: manually started copies hand over to us.
             others.forEach { $0.terminate() }
+            // Agent from an older version (or app moved)? Rewrite it once.
+            if settings.hasCompletedOnboarding, settings.wantsLaunchAgent,
+               !LaunchAgentManager.isUpToDate(runAtLoad: settings.launchAtLogin, keepAlive: settings.keepAlive) {
+                let defaults = UserDefaults.standard
+                let lastRepair = defaults.double(forKey: "lastAgentRepair")
+                if Date().timeIntervalSince1970 - lastRepair > 120 {
+                    defaults.set(Date().timeIntervalSince1970, forKey: "lastAgentRepair")
+                    LaunchAgentManager.log("agent outdated – rewriting")
+                    LaunchAgentManager.applyAndRelaunch(runAtLoad: settings.launchAtLogin, keepAlive: settings.keepAlive)
+                }
+            }
             return
         }
 
@@ -66,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settings.hasCompletedOnboarding,
            settings.wantsLaunchAgent,
            !LaunchAgentManager.shouldSkipHandover,
-           !LaunchAgentManager.isTranslocated {
+           LaunchAgentManager.isInstalledLocationValid {
             // Restart under launchd so a force-quit is followed by an automatic restart.
             LaunchAgentManager.applyAndRelaunch(runAtLoad: settings.launchAtLogin, keepAlive: settings.keepAlive)
         }

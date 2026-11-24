@@ -32,7 +32,7 @@ struct GeneralSettingsView: View {
                 Toggle("Beim Anmelden automatisch starten", isOn: Binding(
                     get: { settings.launchAtLogin },
                     set: { settings.launchAtLogin = $0; pendingAgentChange = true }))
-                Toggle("Nach Absturz oder „Sofort beenden“ automatisch neu starten", isOn: Binding(
+                Toggle("Automatisch neu starten, wenn die App beendet wird oder abstürzt", isOn: Binding(
                     get: { settings.keepAlive },
                     set: { settings.keepAlive = $0; pendingAgentChange = true }))
                 if pendingAgentChange {
@@ -44,16 +44,11 @@ struct GeneralSettingsView: View {
                             .buttonStyle(.borderedProminent)
                     }
                 }
-                if LaunchAgentManager.isTranslocated {
-                    Label("Bitte verschiebe die App in den Ordner „Programme“, damit Autostart funktioniert.",
-                          systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                }
+                BackgroundServiceRow()
             } header: {
                 Text("Start & Hintergrund")
             } footer: {
-                Text("Die App läuft unauffällig in der Menüleiste und nimmt nur auf, solange ein Spiel läuft. Über „Beenden“ im Menü wird sie nicht neu gestartet.")
+                Text("Die App läuft unauffällig in der Menüleiste und nimmt nur auf, solange ein Spiel läuft. Egal ob ⌘Q, „Sofort beenden“ oder Absturz – sie kommt nach wenigen Sekunden zurück. Nur „Simplex Recorder beenden“ im eigenen Menü stoppt sie bis zur nächsten Anmeldung.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -451,5 +446,53 @@ struct StorageSettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             settings.saveFolderPath = url.path
         }
+    }
+}
+
+// MARK: - Background service status
+
+struct BackgroundServiceRow: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Image(systemName: icon).foregroundStyle(color).font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if needsRepair {
+                Button("Reparieren") { AppState.shared.applyBackgroundSettings() }
+            }
+        }
+    }
+
+    private var active: Bool { LaunchAgentManager.isLaunchedByAgent }
+    private var locationOK: Bool { LaunchAgentManager.isInstalledLocationValid }
+    private var needsRepair: Bool { settings.wantsLaunchAgent && locationOK && !active }
+
+    private var icon: String {
+        if active { return "checkmark.shield.fill" }
+        return settings.wantsLaunchAgent ? "exclamationmark.triangle.fill" : "minus.circle"
+    }
+
+    private var color: Color {
+        if active { return .green }
+        return settings.wantsLaunchAgent ? .orange : .secondary
+    }
+
+    private var title: String {
+        if active { return "Hintergrunddienst aktiv" }
+        return settings.wantsLaunchAgent ? "Hintergrunddienst nicht aktiv" : "Hintergrunddienst aus"
+    }
+
+    private var detail: String {
+        if !locationOK {
+            return "Verschiebe die App in den Ordner „Programme“ und öffne sie von dort – aus dem DMG oder Downloads kann macOS sie nicht automatisch starten."
+        }
+        if active { return "Wird von macOS überwacht und automatisch neu gestartet." }
+        if settings.wantsLaunchAgent { return "Klicke auf „Reparieren“ – die App startet kurz neu. Protokoll: ~/Library/Logs/SimplexRecorder/agent.log" }
+        return "Autostart und Neustart sind ausgeschaltet."
     }
 }

@@ -78,49 +78,38 @@ enum ClipExporter {
             return input
         }
 
-        let clipAudio = snapshot.audio.filter(inRange)
-        let clipMic = snapshot.mic.filter(inRange)
+        // Audio and video normally share the host clock. If they don't overlap at all,
+        // shift the audio so its newest sample lines up with the newest video frame.
+        let firstVideoPTS = video[firstSameFormat].presentationTimeStamp
+        let audioSource = alignAudio(snapshot.audio, firstVideo: firstVideoPTS, lastVideo: endPTS)
+        let micSource = alignAudio(snapshot.mic, firstVideo: firstVideoPTS, lastVideo: endPTS)
+
+        let clipAudio = audioSource.filter(inRange)
+        let clipMic = micSource.filter(inRange)
         let audioInput = makeAudioInput(for: clipAudio)
         let micInput = makeAudioInput(for: clipMic)
-
-        struct Item {
-            let sample: CMSampleBuffer
-            let input: AVAssetWriterInput
-            let time: Double
-        }
-        var items: [Item] = clipVideo.map { Item(sample: $0, input: videoInput, time: $0.presentationTimeStamp.seconds) }
-        if let audioInput {
-            items += clipAudio.map { Item(sample: $0, input: audioInput, time: $0.presentationTimeStamp.seconds) }
-        }
-        if let micInput {
-            items += clipMic.map { Item(sample: $0, input: micInput, time: $0.presentationTimeStamp.seconds) }
-        }
-        items.sort { $0.time < $1.time }
 
         guard writer.startWriting() else {
             throw ClipExportError.writerFailed(writer.error?.localizedDescription ?? "Start fehlgeschlagen")
         }
         writer.startSession(atSourceTime: startPTS)
 
-        for item in items {
-            let deadline = Date().addingTimeInterval(10)
-            while !item.input.isReadyForMoreMediaData {
-                if writer.status == .failed {
-                    throw ClipExportError.writerFailed(writer.error?.localizedDescription ?? "unbekannt")
-                }
-                if Date() > deadline { writer.cancelWriting(); throw ClipExportError.timeout }
-                Thread.sleep(forTimeInterval: 0.002)
-            }
-            if !item.input.append(item.sample) {
-                if writer.status == .failed {
-                    throw ClipExportError.writerFailed(writer.error?.localizedDescription ?? "unbekannt")
-                }
-            }
-        }
+        // Feed every track independently – the writer does the interleaving itself.
+        // (Feeding all tracks from one loop can deadlock: the writer pauses one track
+        // until the others catch up.)
+        let group = DispatchGroup()
+        feed(videoInput, samples: clipVideo, writer: writer, group: group, label: "video")
+        if let audioInput { feed(audioInput, samples: clipAudio, writer: writer, group: group, label: "audio") }
+        if let micInput { feed(micInput, samples: clipMic, writer: writer, group: group, label: "mic") }
 
-        videoInput.markAsFinished()
-        audioInput?.markAsFinished()
-        micInput?.markAsFinished()
+        let timeout = max(30.0, Double(clipVideo.count) / 30.0)
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            writer.cancelWriting()
+            throw ClipExportError.timeout
+        }
+        if writer.status == .failed {
+            throw ClipExportError.writerFailed(writer.error?.localizedDescription ?? "unbekannt")
+        }
 
         let semaphore = DispatchSemaphore(value: 0)
         writer.finishWriting { semaphore.signal() }
@@ -129,5 +118,64 @@ enum ClipExporter {
             throw ClipExportError.writerFailed(writer.error?.localizedDescription ?? "Status \(writer.status.rawValue)")
         }
         return CMTimeSubtract(endPTS, startPTS).seconds
+    }
+    private final class FeedState {
+        var index = 0
+        var done = false
+    }
+
+    private static func feed(_ input: AVAssetWriterInput, samples: [CMSampleBuffer],
+                             writer: AVAssetWriter, group: DispatchGroup, label: String) {
+        group.enter()
+        let state = FeedState()
+        let queue = DispatchQueue(label: "com.simplex.recorder.export.\(label)")
+        input.requestMediaDataWhenReady(on: queue) {
+            guard !state.done else { return }
+            while input.isReadyForMoreMediaData {
+                if state.index >= samples.count || writer.status != .writing {
+                    state.done = true
+                    input.markAsFinished()
+                    group.leave()
+                    return
+                }
+                if !input.append(samples[state.index]) {
+                    state.done = true
+                    input.markAsFinished()
+                    group.leave()
+                    return
+                }
+                state.index += 1
+            }
+        }
+    }
+
+    private static func alignAudio(_ samples: [CMSampleBuffer], firstVideo: CMTime, lastVideo: CMTime) -> [CMSampleBuffer] {
+        guard let firstAudio = samples.first?.presentationTimeStamp,
+              let lastAudio = samples.last?.presentationTimeStamp else { return samples }
+        let slack = CMTime(seconds: 5, preferredTimescale: 600)
+        let overlaps = CMTimeCompare(lastAudio, CMTimeSubtract(firstVideo, slack)) >= 0
+            && CMTimeCompare(firstAudio, CMTimeAdd(lastVideo, slack)) <= 0
+        if overlaps { return samples }
+        let offset = CMTimeSubtract(lastVideo, lastAudio)
+        return samples.compactMap { retimed($0, offset: offset) }
+    }
+
+    private static func retimed(_ sample: CMSampleBuffer, offset: CMTime) -> CMSampleBuffer? {
+        var count: CMItemCount = 0
+        CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count)
+        guard count > 0 else { return sample }
+        var infos = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        CMSampleBufferGetSampleTimingInfoArray(sample, entryCount: count, arrayToFill: &infos, entriesNeededOut: &count)
+        for i in 0..<infos.count {
+            infos[i].presentationTimeStamp = CMTimeAdd(infos[i].presentationTimeStamp, offset)
+            if infos[i].decodeTimeStamp.isValid {
+                infos[i].decodeTimeStamp = CMTimeAdd(infos[i].decodeTimeStamp, offset)
+            }
+        }
+        var output: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: sample,
+                                                           sampleTimingEntryCount: count, sampleTimingArray: &infos,
+                                                           sampleBufferOut: &output)
+        return status == noErr ? output : nil
     }
 }
