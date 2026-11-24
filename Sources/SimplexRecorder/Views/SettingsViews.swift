@@ -65,6 +65,27 @@ struct GeneralSettingsView: View {
                 Toggle("Mitteilung anzeigen", isOn: $settings.showNotifications)
             }
 
+            Section {
+                HStack {
+                    Button("Protokoll öffnen") {
+                        if !FileManager.default.fileExists(atPath: DiagnosticsLog.url.path) {
+                            DiagnosticsLog.write("log created")
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            NSWorkspace.shared.open(DiagnosticsLog.url)
+                        }
+                    }
+                    Button("Im Finder zeigen") {
+                        NSWorkspace.shared.activateFileViewerSelecting([DiagnosticsLog.url])
+                    }
+                }
+            } header: {
+                Text("Diagnose")
+            } footer: {
+                Text("Falls etwas nicht klappt (z. B. kein Ton): Protokoll öffnen und den Inhalt schicken.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Berechtigungen") {
                 PermissionRow(title: "Bildschirmaufnahme",
                               detail: "Pflicht – damit Spiele aufgenommen werden können.",

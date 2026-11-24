@@ -88,6 +88,8 @@ enum ClipExporter {
         let clipMic = micSource.filter(inRange)
         let audioInput = makeAudioInput(for: clipAudio)
         let micInput = makeAudioInput(for: clipMic)
+        DiagnosticsLog.write("export: video \(clipVideo.count) frames, system audio \(clipAudio.count)/\(snapshot.audio.count) packets (input: \(audioInput != nil)), mic \(clipMic.count)/\(snapshot.mic.count)"
+            + (snapshot.audio.isEmpty ? "" : ", audio range \(String(format: "%.2f", audioSource.first!.presentationTimeStamp.seconds))–\(String(format: "%.2f", audioSource.last!.presentationTimeStamp.seconds)), video \(String(format: "%.2f", startPTS.seconds))–\(String(format: "%.2f", endPTS.seconds))"))
 
         guard writer.startWriting() else {
             throw ClipExportError.writerFailed(writer.error?.localizedDescription ?? "Start fehlgeschlagen")
@@ -117,6 +119,7 @@ enum ClipExporter {
         guard writer.status == .completed else {
             throw ClipExportError.writerFailed(writer.error?.localizedDescription ?? "Status \(writer.status.rawValue)")
         }
+        DiagnosticsLog.write("export: finished \(url.lastPathComponent)")
         return CMTimeSubtract(endPTS, startPTS).seconds
     }
     private final class FeedState {
@@ -139,6 +142,7 @@ enum ClipExporter {
                     return
                 }
                 if !input.append(samples[state.index]) {
+                    DiagnosticsLog.write("export: append failed on \(label) track at \(state.index)/\(samples.count): \(writer.error?.localizedDescription ?? "-")")
                     state.done = true
                     input.markAsFinished()
                     group.leave()

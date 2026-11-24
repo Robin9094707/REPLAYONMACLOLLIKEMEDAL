@@ -39,6 +39,8 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     private var audioStream: SCStream?
     private var audioOffset: CMTime?
     private var micOffset: CMTime?
+    private var audioPackets = 0
+    private var audioPeak: Float = 0
     private var encoder: VTCompressionSession?
     private let videoQueue = DispatchQueue(label: "com.simplex.recorder.video", qos: .userInteractive)
     private let audioQueue = DispatchQueue(label: "com.simplex.recorder.audio", qos: .userInitiated)
@@ -118,18 +120,27 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         audioQueue.sync {
             self.audioOffset = nil
             self.micOffset = nil
+            self.audioPackets = 0
+            self.audioPeak = 0
         }
+        DiagnosticsLog.write("video stream started \(width)x\(height) @\(fps)fps target=\(config.target.rawValue) game=\(game?.name ?? "-")")
         if config.captureSystemAudio || config.captureMicrophone {
             let ownPID = ProcessInfo.processInfo.processIdentifier
             let own = content.applications.filter { $0.processID == ownPID }
             let audioFilter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
             do {
                 try await startAudioStream(filter: audioFilter, config: config, includeMicrophone: config.captureMicrophone)
+                DiagnosticsLog.write("audio stream started (system: \(config.captureSystemAudio), mic: \(config.captureMicrophone))")
             } catch where config.captureMicrophone {
-                // Microphone permission missing or device busy – retry without it.
-                try? await startAudioStream(filter: audioFilter, config: config, includeMicrophone: false)
+                DiagnosticsLog.write("audio stream with mic failed: \(error) – retrying without mic")
+                do {
+                    try await startAudioStream(filter: audioFilter, config: config, includeMicrophone: false)
+                    DiagnosticsLog.write("audio stream started without mic")
+                } catch {
+                    DiagnosticsLog.write("audio stream failed: \(error)")
+                }
             } catch {
-                NSLog("SimplexRecorder: audio stream failed: \(error)")
+                DiagnosticsLog.write("audio stream failed: \(error)")
             }
         }
 
@@ -260,42 +271,31 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
-    /// Video timestamps are on the host clock. Should an audio stream use a different
-    /// timebase, shift it once so both line up (measured on the first sample).
+    /// Copies the PCM data into memory we own (ScreenCaptureKit may recycle its audio
+    /// buffers, which would leave silence/garbage in a long-lived ring buffer) and moves
+    /// the timestamps onto the host clock used by the video, if they differ.
     private func alignedToHostClock(_ sample: CMSampleBuffer, offset: inout CMTime?) -> CMSampleBuffer? {
         if offset == nil {
             let now = CMClockGetTime(CMClockGetHostTimeClock())
             let diff = CMTimeSubtract(now, sample.presentationTimeStamp)
             offset = abs(diff.seconds) > 1.0 ? diff : .zero
-            if offset != .zero {
-                NSLog("SimplexRecorder: audio clock offset \(diff.seconds)s – correcting")
+            if let fmt = sample.formatDescription,
+               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt)?.pointee {
+                DiagnosticsLog.write("first audio packet: \(asbd.mSampleRate) Hz, \(asbd.mChannelsPerFrame) ch, flags \(asbd.mFormatFlags), \(asbd.mBitsPerChannel) bit, frames \(CMSampleBufferGetNumSamples(sample)), clock offset \(String(format: "%.3f", diff.seconds)) s")
             }
         }
-        guard let value = offset, value != .zero else { return sample }
-        return ClipExporter.retimed(sample, offset: value)
-    }
-
-    private func handleVideo(_ sampleBuffer: CMSampleBuffer) {
-        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
-              let info = attachments.first,
-              let statusRaw = info[.status] as? Int,
-              let status = SCFrameStatus(rawValue: statusRaw),
-              status == .complete,
-              let pixelBuffer = sampleBuffer.imageBuffer,
-              let encoder else { return }
-
-        let buffer = self.buffer
-        VTCompressionSessionEncodeFrame(
-            encoder,
-            imageBuffer: pixelBuffer,
-            presentationTimeStamp: sampleBuffer.presentationTimeStamp,
-            duration: frameDuration,
-            frameProperties: nil,
-            infoFlagsOut: nil
-        ) { status, _, encoded in
-            guard status == noErr, let encoded else { return }
-            buffer.appendVideo(encoded)
+        let copy = AudioCopy.deepCopy(sample, offset: offset ?? .zero)
+        if let copy {
+            audioPackets += 1
+            audioPeak = max(audioPeak, AudioCopy.peak(of: copy))
+            if audioPackets % 1500 == 0 { // ~ every 30 s
+                DiagnosticsLog.write("audio: \(audioPackets) packets, peak level \(String(format: "%.4f", audioPeak))\(audioPeak < 0.0001 ? " (STILLE)" : "")")
+                audioPeak = 0
+            }
+        } else if audioPackets == 0 {
+            DiagnosticsLog.write("audio copy failed")
         }
+        return copy
     }
 
     // MARK: SCStreamDelegate
@@ -303,7 +303,7 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         if stream === audioStream {
             // Losing audio is not fatal – the video keeps running.
-            NSLog("SimplexRecorder: audio stream stopped: \(error)")
+            DiagnosticsLog.write("audio stream stopped: \(error)")
             audioStream = nil
             return
         }
