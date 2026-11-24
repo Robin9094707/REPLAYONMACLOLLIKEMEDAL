@@ -94,7 +94,6 @@ struct DashboardView: View {
                     open { WindowManager.shared.showSettings(tab: .clips) }
                 }
             }
-        }
             if let app = detector.frontmostApp {
                 Divider().opacity(0.5)
                 HStack(spacing: 8) {
@@ -195,11 +194,11 @@ struct DashboardView: View {
     // MARK: Helpers
 
     /// Close the menu bar panel, then run the action.
-    private func open(_ action: @escaping () -> Void) {
+    private func open(_ action: @escaping @MainActor () -> Void) {
         for window in NSApp.windows where window.className.contains("MenuBarExtra") {
             window.close()
         }
-        DispatchQueue.main.async(execute: action)
+        Task { @MainActor in action() }
     }
 
     private func durationShort(_ seconds: Int) -> String {
