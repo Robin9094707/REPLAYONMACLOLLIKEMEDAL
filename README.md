@@ -5,6 +5,24 @@
 (Früher „Simplex Recorder“. Einstellungen werden übernommen.)
 Die App läuft unauffällig in der Menüleiste und nimmt im Hintergrund auf, sobald ein Spiel läuft (z. B. **Minecraft Java Edition**). Ein Tastendruck speichert die **letzten 30 Sekunden** als Clip.
 
+## 📱 Remote-Zugang: Simplex Remote (iPhone) + Relay-Server
+
+| | |
+|---|---|
+| 🛰 **Eigener Server** | `server/relay.py` auf deinem VPS (z. B. CubeCoders AMP, Python App Runner). Erzeugt beim ersten Start ein Passwort in `simplex_relay.json`, änderbar ohne Neustart. Anleitung: [server/README.md](server/README.md) |
+| 🔐 **Ende-zu-Ende verschlüsselt** | AES-GCM zwischen Mac und iPhone. Der Server sieht weder Bild noch Eingaben oder Passwörter |
+| 🔗 **Koppeln per QR-Code** | Mac: Einstellungen → Remote → QR-Code. iPhone: **+** → scannen |
+| 📊 **Live-Daten ohne Verbindung** | Online-Status, Laufzeit, CPU, RAM, Temperatur, Akku, Clipping-Status, aktive Apps |
+| 🖐 **Touch-Steuerung** | Mac spiegeln, Touch- oder Trackpad-Modus, Rechtsklick, Ziehen, Scrollen, Zoom |
+| 🖥 **iPhone als Bildschirm** | Als zweiter Bildschirm oder Hauptbildschirm, hoch oder quer (virtueller Monitor, experimentell) |
+| ⌨️ **Tastatur & Zwischenablage** | Bildschirm- und Hardware-Tastatur, ⌘/⌥/⌃/⇧-Leiste, Zwischenablage in beide Richtungen |
+| ⚡️ **Schnellmenü** | Anpassbar: alle Apps beenden (außer der Suite), Sperren, Clip, Screenshot, Musik, Lautstärke, Mission Control … |
+| 🔓 **Entsperren mit Face ID** | Mac-Passwort im iPhone-Schlüsselbund, geschützt durch Face ID |
+
+**IPA installieren:** Die IPA aus GitHub Actions ist unsigniert. Installiere sie mit **Sideloadly** oder **AltStore** und deiner Apple-ID. Mit einer kostenlosen Apple-ID muss die App alle 7 Tage neu signiert werden.
+
+**Grenzen:** Vor der Anmeldung (nach einem Neustart mit FileVault) läuft keine App, die Suite startet ab dem Login automatisch. Entsperren per Face ID funktioniert bei gesperrtem Bildschirm eines angemeldeten Benutzers.
+
 ## Suite-Werkzeuge
 
 | | |
