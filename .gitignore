@@ -6,7 +6,6 @@ dist/
 iOS/*.xcodeproj/
 iOS/build/
 iOS/Payload/
-*.ipa
 iOS/SimplexRemote/Assets.xcassets/AppIcon.appiconset/icon_1024.png
 server/simplex_relay.json
 __pycache__/
