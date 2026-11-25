@@ -216,9 +216,25 @@ final class RemoteAgent: ObservableObject {
         }
     }
 
+    private var lastAccessibilityWarning = Date.distantPast
+
+    /// Synthetic mouse/keyboard events are silently dropped by macOS without Accessibility.
+    private func ensureAccessibility() -> Bool {
+        if AXIsProcessTrusted() { return true }
+        if Date().timeIntervalSince(lastAccessibilityWarning) > 20 {
+            lastAccessibilityWarning = Date()
+            toast("⚠️ Am Mac fehlt die Berechtigung „Bedienungshilfen“ – bitte erlauben")
+            GameWindowAssistant.requestTrust()
+            DiagnosticsLog.write("remote: input blocked – Accessibility not granted")
+        }
+        return false
+    }
+
     private func handleControl(_ msg: [String: Any]) {
         guard let type = msg["t"] as? String else { return }
         let control = config.allowControl
+        let inputTypes: Set<String> = ["mouse", "text", "key", "unlock"]
+        if inputTypes.contains(type) && control && !ensureAccessibility() { return }
         switch type {
         case "start":
             guard control else { return toast("Fernsteuerung ist am Mac deaktiviert") }
@@ -241,6 +257,16 @@ final class RemoteAgent: ObservableObject {
             }
         case "action":
             guard control else { return toast("Fernsteuerung ist am Mac deaktiviert") }
+            if msg["a"] as? String == "openAccessibility" {
+                if AXIsProcessTrusted() { return toast("✓ Bedienungshilfen sind bereits erlaubt") }
+                GameWindowAssistant.resetTrust()
+                GameWindowAssistant.requestTrust()
+                GameWindowAssistant.openAccessibilitySettings()
+                return toast("Am Mac: „Simplex Suite“ in Bedienungshilfen einschalten")
+            }
+            let keyActions: Set<String> = ["lock", "playPause", "next", "previous", "showDesktop", "spotlight",
+                                           "appSwitcher", "copy", "paste", "undo", "closeWindow"]
+            if keyActions.contains(msg["a"] as? String ?? "") && !ensureAccessibility() { return }
             RemoteActions.perform(msg, injector: injector) { [weak self] text in self?.toast(text) }
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.2))
@@ -282,7 +308,7 @@ final class RemoteAgent: ObservableObject {
     nonisolated private func sendVideo(_ packet: Data, keyframe: Bool) {
         sendLock.lock()
         let task = sendTask, crypto = sendCrypto
-        if inflight > 8 && !keyframe {
+        if inflight > 4 && !keyframe {
             waitingForKeyframe = true
             sendLock.unlock()
             return
@@ -302,7 +328,7 @@ final class RemoteAgent: ObservableObject {
             guard let self else { return }
             self.sendLock.lock()
             self.inflight -= 1
-            let recovered = self.waitingForKeyframe && self.inflight < 3
+            let recovered = self.waitingForKeyframe && self.inflight < 2
             self.sendLock.unlock()
             if recovered {
                 Task { @MainActor in RemoteAgent.shared.streamer.requestKeyframe() }
@@ -346,6 +372,8 @@ final class RemoteAgent: ObservableObject {
             "mode": streamMode,
             "control": config.allowControl,
             "virtualDisplays": SXVirtualDisplay.isSupported(),
+            "trusted": AXIsProcessTrusted(),
+            "screen": Permissions.hasScreenRecording,
             "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             "t": Date().timeIntervalSince1970,
         ]

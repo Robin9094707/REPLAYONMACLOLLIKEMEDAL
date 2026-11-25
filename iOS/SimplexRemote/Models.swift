@@ -74,6 +74,8 @@ struct MacStatus {
     var streaming = false
     var control = true
     var virtualDisplays = false
+    var trusted = true
+    var screenRecording = true
     var version = ""
     var apps: [AppUsage] = []
     var receivedAt = Date()
@@ -102,6 +104,8 @@ struct MacStatus {
         streaming = json["streaming"] as? Bool ?? false
         control = json["control"] as? Bool ?? true
         virtualDisplays = json["virtualDisplays"] as? Bool ?? false
+        trusted = json["trusted"] as? Bool ?? true
+        screenRecording = json["screen"] as? Bool ?? true
         version = json["version"] as? String ?? ""
         apps = (json["apps"] as? [[String: Any]] ?? []).map {
             AppUsage(pid: ($0["pid"] as? NSNumber)?.intValue ?? 0,

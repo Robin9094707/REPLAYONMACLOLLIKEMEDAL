@@ -9,6 +9,8 @@ struct RemoteSettingsView: View {
     @State private var copied = false
     @State private var draftServer = RemoteConfig.shared.serverURL
     @State private var draftPassword = RemoteConfig.shared.serverPassword
+    @State private var trusted = AXIsProcessTrusted()
+    private let refresh = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Form {
@@ -107,6 +109,13 @@ struct RemoteSettingsView: View {
             }
 
             Section {
+                PermissionRow(title: "Bedienungshilfen",
+                              detail: "Pflicht für Maus, Tastatur und viele Schnellaktionen vom iPhone.",
+                              granted: trusted, actionTitle: "Erlauben …") {
+                    GameWindowAssistant.resetTrust()
+                    GameWindowAssistant.requestTrust()
+                    GameWindowAssistant.openAccessibilitySettings()
+                }
                 Toggle("Fernsteuerung erlauben (Bildschirm, Maus, Tastatur, Aktionen)", isOn: $config.allowControl)
                 Toggle("Entsperren per Face ID vom iPhone erlauben", isOn: $config.allowUnlock)
                 LabeledContent("Virtueller Zweitbildschirm") {
@@ -122,6 +131,7 @@ struct RemoteSettingsView: View {
         }
         .formStyle(.grouped)
         .onChange(of: config.computerName) { _, _ in agent.reconnectNow() }
+        .onReceive(refresh) { _ in trusted = AXIsProcessTrusted() }
     }
 
     private var stateColor: Color {

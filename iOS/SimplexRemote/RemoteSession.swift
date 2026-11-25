@@ -33,13 +33,13 @@ enum StreamQuality: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .saver: return "Datensparend"
-        case .balanced: return "Ausgewogen"
+        case .balanced: return "Flüssig"
         case .sharp: return "Gestochen scharf"
         }
     }
-    var kbps: Int { [.saver: 2500, .balanced: 6000, .sharp: 14000][self] ?? 6000 }
-    var fps: Int { self == .saver ? 30 : 60 }
-    var maxWidth: Int { [.saver: 1280, .balanced: 1920, .sharp: 2560][self] ?? 1920 }
+    var kbps: Int { [.saver: 2000, .balanced: 4500, .sharp: 12000][self] ?? 4500 }
+    var fps: Int { self == .sharp ? 60 : 30 }
+    var maxWidth: Int { [.saver: 1280, .balanced: 1680, .sharp: 2560][self] ?? 1680 }
 }
 
 /// A live remote-control session with one Mac.
@@ -81,16 +81,20 @@ final class RemoteSession: ObservableObject {
             guard macID == id else { return }
             self?.handleControl(json)
         }
-        store.connection(for: mac)?.attach(mac.id)
-        requestStream()
+        let serverKey = mac.serverKey
+        store.reconnectHandler = { [weak self] key in
+            guard key == serverKey, let self, self.streaming || self.connecting else { return }
+            self.requestStream()
+        }
+        requestStream()   // attaches automatically
         UIApplication.shared.isIdleTimerDisabled = true
     }
 
     func stop() {
         send(["t": "stop"])
-        store.connection(for: mac)?.detach()
         store.videoHandler = nil
         store.controlHandler = nil
+        store.reconnectHandler = nil
         streaming = false
         UIApplication.shared.isIdleTimerDisabled = false
     }

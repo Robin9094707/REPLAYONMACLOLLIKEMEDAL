@@ -50,30 +50,30 @@ extension View {
 struct AuroraBackground: View {
     @State private var animate = false
 
+    // Radial gradients instead of blurred shapes: same soft look, a fraction of the GPU cost.
     var body: some View {
         ZStack {
             Color(red: 0.04, green: 0.04, blue: 0.09)
-            Circle()
-                .fill(Color(red: 0.45, green: 0.3, blue: 1.0))
-                .frame(width: 420, height: 420)
-                .blur(radius: 120)
-                .offset(x: animate ? -120 : -40, y: animate ? -260 : -180)
-            Circle()
-                .fill(Color(red: 1.0, green: 0.3, blue: 0.5))
-                .frame(width: 360, height: 360)
-                .blur(radius: 120)
-                .offset(x: animate ? 140 : 60, y: animate ? 40 : 160)
-            Circle()
-                .fill(Color(red: 0.2, green: 0.7, blue: 1.0))
-                .frame(width: 320, height: 320)
-                .blur(radius: 110)
-                .offset(x: animate ? -60 : 80, y: animate ? 360 : 260)
+            blob(Color(red: 0.45, green: 0.3, blue: 1.0), size: 620)
+                .offset(x: animate ? -110 : -50, y: animate ? -250 : -190)
+            blob(Color(red: 1.0, green: 0.3, blue: 0.5), size: 540)
+                .offset(x: animate ? 130 : 70, y: animate ? 60 : 150)
+            blob(Color(red: 0.2, green: 0.7, blue: 1.0), size: 500)
+                .offset(x: animate ? -50 : 70, y: animate ? 360 : 280)
         }
-        .opacity(0.9)
+        .drawingGroup()
         .ignoresSafeArea()
+        .allowsHitTesting(false)
         .onAppear {
-            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { animate = true }
+            withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) { animate = true }
         }
+    }
+
+    private func blob(_ color: Color, size: CGFloat) -> some View {
+        Circle()
+            .fill(RadialGradient(colors: [color.opacity(0.55), color.opacity(0)], center: .center,
+                                 startRadius: 0, endRadius: size / 2))
+            .frame(width: size, height: size)
     }
 }
 

@@ -15,6 +15,8 @@ final class RelayConnection: NSObject {
     private var reconnectWork: DispatchWorkItem?
     private var shouldRun = false
     private let lock = NSLock()
+    /// Mac the relay currently routes our commands to.
+    private(set) var attachedMac: String?
 
     // Callbacks (status/control on the main queue, video on the receive queue).
     var onState: ((State) -> Void)?
@@ -85,6 +87,7 @@ final class RelayConnection: NSObject {
         let task = session.webSocketTask(with: url)
         task.maximumMessageSize = 16 * 1024 * 1024
         self.task = task
+        attachedMac = nil
         emit(.connecting)
         task.resume()
         lock.lock()
@@ -202,10 +205,20 @@ final class RelayConnection: NSObject {
         task?.send(.string(text)) { _ in }
     }
 
-    func attach(_ macID: String) { sendJSON(["type": "attach", "mac": macID]) }
-    func detach() { sendJSON(["type": "detach"]) }
+    func attach(_ macID: String) {
+        attachedMac = macID
+        sendJSON(["type": "attach", "mac": macID])
+    }
 
+    func detach() {
+        attachedMac = nil
+        sendJSON(["type": "detach"])
+    }
+
+    /// The relay only forwards commands to the attached Mac – attach first if needed.
+    /// (Text and binary messages keep their order on the WebSocket.)
     func sendControl(_ object: [String: Any], to macID: String) {
+        if attachedMac != macID { attach(macID) }
         guard let crypto = crypto(for: macID),
               let data = try? JSONSerialization.data(withJSONObject: object),
               let sealed = crypto.seal(.control, data) else { return }
@@ -228,6 +241,8 @@ final class MacStore: ObservableObject {
 
     /// Control messages for an active remote session.
     var controlHandler: ((String, [String: Any]) -> Void)?
+    /// Called when a relay connection is (re)established – the session re-requests its stream.
+    var reconnectHandler: ((String) -> Void)?
     /// Video frames (called off the main thread).
     var videoHandler: ((String, Data) -> Void)? {
         didSet { connections.values.forEach { $0.onVideo = videoHandler } }
@@ -289,7 +304,12 @@ final class MacStore: ObservableObject {
     private func makeConnection(server: String, password: String) -> RelayConnection {
         let conn = RelayConnection(server: server, password: password)
         let key = server.lowercased()
-        conn.onState = { [weak self] state in self?.serverStates[key] = state }
+        conn.onState = { [weak self] state in
+            guard let self else { return }
+            let previous = self.serverStates[key]
+            self.serverStates[key] = state
+            if state == .connected && previous != .connected { self.reconnectHandler?(key) }
+        }
         conn.onPresence = { [weak self] mac, p in self?.presence[mac] = p }
         conn.onStatus = { [weak self] mac, json in self?.updateStatus(mac, json) }
         conn.onControl = { [weak self] mac, json in self?.handleControl(mac, json) }
@@ -339,7 +359,13 @@ final class MacStore: ObservableObject {
     // MARK: Commands
 
     func send(_ object: [String: Any], to mac: PairedMac) {
-        connection(for: mac)?.sendControl(object, to: mac.id)
+        guard let conn = connection(for: mac) else { return }
+        conn.sendControl(object, to: mac.id)
+    }
+
+    func detach(_ mac: PairedMac) {
+        guard let conn = connection(for: mac), conn.attachedMac == mac.id else { return }
+        conn.detach()
     }
 
     func action(_ action: QuickAction, on mac: PairedMac) {

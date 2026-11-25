@@ -30,6 +30,7 @@ struct MacDetailView: View {
             VStack(spacing: 18) {
                 hero(status, online: online)
                 if online, let status {
+                    if !status.trusted { PermissionBanner(mac: mac) }
                     gauges(status)
                     if status.locked { unlockCard }
                     connectCard(status)
@@ -76,6 +77,7 @@ struct MacDetailView: View {
             Text(confirmAction == .quitAll ? "Alle Apps außer Simplex Suite werden beendet." : "Bist du sicher?")
         }
         .onAppear(perform: refreshUnlock)
+        .onDisappear { if session == nil { store.detach(mac) } }
     }
 
     private func refreshUnlock() { hasUnlockPassword = Keychain.hasUnlockPassword(macID: mac.id) }
@@ -366,5 +368,31 @@ struct UnlockPasswordSheet: View {
                 }
             }
         }
+    }
+}
+
+/// Shown when the Mac can't inject input because Accessibility is missing.
+struct PermissionBanner: View {
+    @EnvironmentObject private var store: MacStore
+    let mac: PairedMac
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "hand.raised.fill").font(.title2).foregroundStyle(.yellow)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Steuerung am Mac blockiert").font(.headline)
+                Text("Simplex Suite braucht am Mac die Berechtigung „Bedienungshilfen“ – sonst ignoriert macOS Klicks und Tasten.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Button("Am Mac öffnen") {
+                store.send(["t": "action", "a": "openAccessibility"], to: mac)
+            }
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .glassCapsule(tint: .yellow)
+        }
+        .padding(16)
+        .glassCard(tint: .yellow)
     }
 }

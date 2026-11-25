@@ -33,6 +33,9 @@ struct RemoteView: View {
 
             VStack {
                 if !toolbarHidden { topBar.transition(.move(edge: .top).combined(with: .opacity)) }
+                if store.statuses[session.mac.id]?.trusted == false {
+                    PermissionBanner(mac: session.mac).padding(.top, 6)
+                }
                 Spacer()
                 if session.keyboardVisible { keyBar.transition(.move(edge: .bottom).combined(with: .opacity)) }
             }
