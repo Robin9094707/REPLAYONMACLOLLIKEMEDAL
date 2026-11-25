@@ -178,6 +178,7 @@ struct DashboardView: View {
 
     private var footer: some View {
         HStack {
+            RemoteBadge { open { WindowManager.shared.showSettings(tab: .remote) } }
             Button("Clip-Ordner") { open { state.openClipFolder() } }
             Spacer()
             if let last = state.lastSavedClip {
@@ -335,5 +336,29 @@ extension Int64 {
         formatter.allowedUnits = [.useMB, .useGB, .useTB]
         formatter.zeroPadsFractionDigits = false
         return formatter.string(fromByteCount: self)
+    }
+}
+
+struct RemoteBadge: View {
+    @ObservedObject private var agent = RemoteAgent.shared
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "iphone.radiowaves.left.and.right")
+                Circle().fill(color).frame(width: 6, height: 6)
+            }
+        }
+        .help("Remote: \(agent.state.title)")
+    }
+
+    private var color: Color {
+        switch agent.state {
+        case .connected: return agent.attachedClients > 0 ? .blue : .green
+        case .connecting: return .orange
+        case .error: return .red
+        case .off: return .secondary
+        }
     }
 }

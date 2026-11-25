@@ -93,6 +93,7 @@ final class AppState: ObservableObject {
         refreshLibrary()
         scheduleReevaluate()
         SuiteCoordinator.shared.start()
+        RemoteAgent.shared.start()
     }
 
     /// After an update the old privacy entry belongs to the previous (differently signed)

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: Int, CaseIterable {
-    case general, recording, hotkeys, games, windows, keyboard, system, storage, clips
+    case general, recording, hotkeys, games, windows, keyboard, system, remote, storage, clips
 
     var title: String {
         switch self {
@@ -13,6 +13,7 @@ enum SettingsTab: Int, CaseIterable {
         case .windows: return "Fenster"
         case .keyboard: return "Tastatur"
         case .system: return "System"
+        case .remote: return "Remote"
         case .storage: return "Speicher"
         case .clips: return "Clips"
         }
@@ -27,6 +28,7 @@ enum SettingsTab: Int, CaseIterable {
         case .windows: return "macwindow.on.rectangle"
         case .keyboard: return "command"
         case .system: return "cpu"
+        case .remote: return "iphone.radiowaves.left.and.right"
         case .storage: return "externaldrive"
         case .clips: return "film.stack"
         }
@@ -61,7 +63,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
             for item in SettingsTab.allCases {
                 let controller = NSHostingController(rootView: AnyView(inject(settingsView(for: item))))
                 controller.sizingOptions = []
-                controller.preferredContentSize = NSSize(width: 780, height: 580)
+                controller.preferredContentSize = NSSize(width: 860, height: 600)
                 let tabItem = NSTabViewItem(viewController: controller)
                 tabItem.label = item.title
                 tabItem.image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: item.title)
@@ -71,7 +73,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.toolbarStyle = .preference
             window.title = "Simplex Suite"
-            window.setContentSize(NSSize(width: 780, height: 580))
+            window.setContentSize(NSSize(width: 860, height: 600))
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()
@@ -150,6 +152,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
         case .windows: WindowSettingsView()
         case .keyboard: KeyboardSettingsView()
         case .system: SystemSettingsView()
+        case .remote: RemoteSettingsView()
         case .storage: StorageSettingsView()
         case .clips: ClipsView()
         }
