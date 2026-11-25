@@ -3,6 +3,8 @@ import AppKit
 
 let size: CGFloat = 1024
 let output = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon_1024.png"
+// "fullbleed": square, opaque icon for iOS (the system applies the rounded mask itself).
+let fullBleed = CommandLine.arguments.contains("fullbleed")
 
 guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size), pixelsHigh: Int(size),
                                  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -13,11 +15,12 @@ NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 
 // macOS icon grid: 824×824 body centred in 1024 canvas.
-let inset: CGFloat = 100
+let inset: CGFloat = fullBleed ? 0 : 100
 let body = NSRect(x: inset, y: inset, width: size - 2 * inset, height: size - 2 * inset)
-let radius: CGFloat = 185
+let radius: CGFloat = fullBleed ? 0 : 185
 
 let shadow = NSShadow()
+if fullBleed { shadow.shadowColor = .clear }
 shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
 shadow.shadowBlurRadius = 28
 shadow.shadowOffset = NSSize(width: 0, height: -12)
