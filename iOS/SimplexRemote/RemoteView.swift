@@ -82,7 +82,7 @@ struct RemoteView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: session.inputMode.symbol)
-                    Text(session.mac.name).lineLimit(1)
+                    Text(session.mac.name).lineLimit(1).frame(maxWidth: 130)
                     Image(systemName: "chevron.down").font(.caption2)
                 }
                 .font(.system(size: 14, weight: .semibold))
@@ -96,7 +96,12 @@ struct RemoteView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "cellularbars", variableValue: Double(session.net.quality) / 3)
                         .foregroundStyle(session.net.quality >= 2 ? Color.green : (session.net.quality == 1 ? Color.orange : Color.red))
-                    Text(session.net.text).font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
+                    ViewThatFits(in: .horizontal) {
+                        Text(session.net.text)
+                        Text(session.net.compactText)
+                    }
+                    .font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
+                    .lineLimit(1)
                 }
                 .padding(.horizontal, 10).frame(height: 32)
                 .glassCapsule(interactive: false)

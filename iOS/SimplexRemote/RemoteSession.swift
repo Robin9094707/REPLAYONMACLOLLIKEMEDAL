@@ -207,7 +207,8 @@ struct NetStats: Equatable {
     }
 
     var text: String {
-        let mbit = Double(kbps) / 1000
-        return String(format: "%.1f Mbit/s · %d ms · %d fps", mbit, rtt, fps)
+        String(format: "%.1f Mbit · %d ms", Double(kbps) / 1000, rtt)
     }
+
+    var compactText: String { "\(rtt) ms" }
 }
