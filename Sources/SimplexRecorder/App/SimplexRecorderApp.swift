@@ -15,7 +15,8 @@ struct SimplexRecorderApp: App {
                 .environmentObject(state.storage)
                 .environmentObject(state.detector)
         } label: {
-            MenuBarLabel(state: state, settings: state.settings, suite: SuiteSettings.shared, monitor: SystemMonitor.shared)
+            MenuBarLabel(state: state, settings: state.settings, suite: SuiteSettings.shared,
+                         monitor: SystemMonitor.shared, recorder: ScreenRecorder.shared)
         }
         .menuBarExtraStyle(.window)
     }
@@ -111,6 +112,7 @@ struct MenuBarLabel: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var suite: SuiteSettings
     @ObservedObject var monitor: SystemMonitor
+    @ObservedObject var recorder: ScreenRecorder
 
     var body: some View {
         HStack(spacing: 4) {
@@ -134,6 +136,10 @@ struct MenuBarLabel: View {
 
     private var statsText: String {
         var parts: [String] = []
+        if recorder.isRecording {
+            // TimelineView isn't available in menu bar labels – the timer below refreshes via SystemMonitor.
+            parts.append("⏺ REC")
+        }
         if state.isRecording {
             parts.append(settings.menuBarShowsTimer ? "● \(Int(state.bufferedSeconds))s" : "●")
         }

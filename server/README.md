@@ -42,6 +42,8 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_read_timeout 3600s;
+        client_max_body_size 2G;      # Clip-Uploads
+        proxy_request_buffering off;  # große Uploads direkt durchreichen
     }
     # + Let's-Encrypt-Zertifikat (certbot --nginx)
 }
@@ -50,6 +52,25 @@ server {
 Mit Caddy reicht: `remote.deine-domain.de { reverse_proxy 127.0.0.1:8765 }`
 
 **B) Direkt im Server:** In `simplex_relay.json` `tls_cert` und `tls_key` auf die Zertifikatsdateien setzen (z. B. `/etc/letsencrypt/live/<domain>/fullchain.pem` und `privkey.pem`).
+
+## Clips teilen (neu in 1.1)
+
+Die Mac-App kann Clips optional auf diesen Server hochladen. Jeder Clip bekommt einen Link wie `https://remote.deine-domain.de/c/Ab3xYz9KpQ`:
+
+- **Im Browser** spielt der Link sofort ab, ohne Anmeldung, mit Vorspulen und Download.
+- **Discord, WhatsApp, Telegram, iMessage** zeigen automatisch eine Vorschau, Discord spielt das Video direkt im Chat ab.
+- **Verwalten:** In der iPhone-App unter **Clips** siehst du alle Clips mit Speicherverbrauch, kannst sie ansehen, teilen und löschen.
+
+Einstellungen in `simplex_relay.json`:
+
+| Schlüssel | Bedeutung |
+|---|---|
+| `clips_enabled` | `true` / `false`: Uploads erlauben |
+| `max_storage_gb` | Maximaler Speicher für Clips (Standard 20) |
+| `public_url` | Basis für Links, z. B. `https://remote.deine-domain.de`. Leer = automatisch aus der Anfrage |
+
+Die Clips liegen im Ordner `clips/` neben `relay.py`. Im Reverse Proxy das Upload-Limit erhöhen, bei nginx z. B. `client_max_body_size 2G;`.
+Geteilte Clips sind **nicht** Ende-zu-Ende verschlüsselt: Wer den Link kennt, kann sie ansehen.
 
 ## Verbinden
 

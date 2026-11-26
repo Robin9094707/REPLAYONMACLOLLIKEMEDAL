@@ -64,7 +64,7 @@ final class RemoteAgent: ObservableObject {
     private var streamFPS = 30
     private var stableSeconds = 0
     private var adaptTimer: Timer?
-    private static let latencyBudget: TimeInterval = 0.35
+    private static let latencyBudget: TimeInterval = 0.25
 
     private var config: RemoteConfig { RemoteConfig.shared }
 

@@ -42,6 +42,9 @@ final class RemoteConfig: ObservableObject {
     @Published var computerName: String { didSet { d.set(computerName, forKey: "remote.name") } }
     @Published var allowControl: Bool { didSet { d.set(allowControl, forKey: "remote.allowControl") } }
     @Published var allowUnlock: Bool { didSet { d.set(allowUnlock, forKey: "remote.allowUnlock") } }
+    @Published var uploadEnabled: Bool { didSet { d.set(uploadEnabled, forKey: "remote.uploadEnabled") } }
+    @Published var autoUpload: Bool { didSet { d.set(autoUpload, forKey: "remote.autoUpload") } }
+    @Published var copyLinkAfterUpload: Bool { didSet { d.set(copyLinkAfterUpload, forKey: "remote.copyLink") } }
     @Published private(set) var macID: String
     @Published private(set) var keyData: Data
 
@@ -55,7 +58,11 @@ final class RemoteConfig: ObservableObject {
 
     private init() {
         let d = UserDefaults.standard
-        d.register(defaults: ["remote.enabled": false, "remote.allowControl": true, "remote.allowUnlock": true])
+        d.register(defaults: ["remote.enabled": false, "remote.allowControl": true, "remote.allowUnlock": true,
+                              "remote.uploadEnabled": true, "remote.autoUpload": false, "remote.copyLink": true])
+        uploadEnabled = d.bool(forKey: "remote.uploadEnabled")
+        autoUpload = d.bool(forKey: "remote.autoUpload")
+        copyLinkAfterUpload = d.bool(forKey: "remote.copyLink")
         enabled = d.bool(forKey: "remote.enabled")
         serverURL = d.string(forKey: "remote.server") ?? ""
         serverPassword = d.string(forKey: "remote.password") ?? ""
@@ -91,6 +98,20 @@ final class RemoteConfig: ObservableObject {
     var crypto: RemoteCrypto { RemoteCrypto(key: SymmetricKey(data: keyData)) }
 
     var isConfigured: Bool { !serverURL.trimmingCharacters(in: .whitespaces).isEmpty && !serverPassword.isEmpty }
+
+    /// https://example.com (for the clip API).
+    var httpBaseURL: URL? {
+        var raw = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if !raw.contains("://") { raw = "https://" + raw }
+        guard var comps = URLComponents(string: raw) else { return nil }
+        switch comps.scheme?.lowercased() {
+        case "http", "ws": comps.scheme = "http"
+        default: comps.scheme = "https"
+        }
+        comps.path = ""
+        return comps.url
+    }
 
     /// https://example.com → wss://example.com/ws (keeps a custom port/path).
     var webSocketURL: URL? {

@@ -82,6 +82,7 @@ struct ClipsView: View {
 
 struct ClipCard: View {
     let clip: Clip
+    @ObservedObject private var uploader = ClipUploader.shared
     @EnvironmentObject private var library: ClipLibrary
     @State private var thumbnail: NSImage?
     @State private var duration: Double?
@@ -120,7 +121,16 @@ struct ClipCard: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            Text(clip.name).font(.caption.weight(.medium)).lineLimit(1).truncationMode(.middle)
+            HStack(spacing: 4) {
+                if uploader.link(for: clip.url) != nil {
+                    Image(systemName: "link.icloud.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                        .help("Auf dem Server – Rechtsklick → Link kopieren")
+                }
+                if let p = uploader.progress[clip.url] {
+                    ProgressView(value: p).controlSize(.mini).frame(width: 40)
+                }
+                Text(clip.name).font(.caption.weight(.medium)).lineLimit(1).truncationMode(.middle)
+            }
             HStack {
                 Text(clip.game).font(.caption2).foregroundStyle(.secondary)
                 Spacer()
@@ -137,6 +147,11 @@ struct ClipCard: View {
         .contextMenu {
             Button("Abspielen") { NSWorkspace.shared.open(clip.url) }
             Button("Im Finder zeigen") { NSWorkspace.shared.activateFileViewerSelecting([clip.url]) }
+            if ClipUploader.shared.isAvailable {
+                Button(ClipUploader.shared.link(for: clip.url) == nil ? "Hochladen & Link kopieren" : "Link kopieren") {
+                    ClipUploader.shared.upload(clip.url, game: clip.game)
+                }
+            }
             Button("Kopieren (zum Einfügen in Discord & Co.)") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([clip.url as NSURL])

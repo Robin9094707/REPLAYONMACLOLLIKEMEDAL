@@ -129,7 +129,6 @@ final class RemoteSurfaceView: UIView, UIGestureRecognizerDelegate {
     private var offset: CGPoint = .zero
     private var lastMoveSent: TimeInterval = 0
     private var pendingRel: CGPoint = .zero
-    private var dragging = false
     let keyInput = KeyInputView()
 
     override init(frame: CGRect) {
@@ -188,6 +187,17 @@ final class RemoteSurfaceView: UIView, UIGestureRecognizerDelegate {
     }
 
     // MARK: Gestures
+    //
+    // Touch mode = the Mac behaves like a real touchscreen:
+    //   tap → click · double tap → double click · drag → click-and-drag (move windows, select)
+    //   press & hold → right click · two fingers → scroll (with momentum) · pinch → zoom
+    // Trackpad mode = relative pointer like a laptop trackpad.
+
+    private var lastPan: CGPoint = .zero
+    private var scrollVelocity: CGPoint = .zero
+    private var momentumLink: CADisplayLink?
+    private var lastMomentumTime: CFTimeInterval = 0
+    private var dragActive = false
 
     private func setupGestures() {
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
@@ -197,7 +207,8 @@ final class RemoteSurfaceView: UIView, UIGestureRecognizerDelegate {
         let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(rightTapped(_:)))
         twoFingerTap.numberOfTouchesRequired = 2
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:)))
-        longPress.minimumPressDuration = 0.35
+        longPress.minimumPressDuration = 0.45
+        longPress.allowableMovement = 12
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
         pan.maximumNumberOfTouches = 1
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
@@ -206,6 +217,7 @@ final class RemoteSurfaceView: UIView, UIGestureRecognizerDelegate {
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
         for g in [doubleTap, tap, twoFingerTap, longPress, pan, scroll, pinch] as [UIGestureRecognizer] {
             g.delegate = self
+            g.delaysTouchesBegan = false
             addGestureRecognizer(g)
         }
         pan.require(toFail: longPress)
@@ -216,88 +228,157 @@ final class RemoteSurfaceView: UIView, UIGestureRecognizerDelegate {
             || (other is UIPinchGestureRecognizer && g is UIPanGestureRecognizer)
     }
 
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        stopMomentum()   // a new touch stops a flick, like on iOS
+    }
+
     @objc private func tapped(_ g: UITapGestureRecognizer) {
-        mouse("click", at: g.location(in: self))
+        let p = g.location(in: self)
+        mouse("click", at: p)
+        ripple(at: p)
         haptic(.light)
     }
 
     @objc private func doubleTapped(_ g: UITapGestureRecognizer) {
-        mouse("dclick", at: g.location(in: self))
+        let p = g.location(in: self)
+        mouse("dclick", at: p)
+        ripple(at: p)
         haptic(.light)
     }
 
     @objc private func rightTapped(_ g: UITapGestureRecognizer) {
-        mouse("rclick", at: g.location(in: self), extra: ["b": "right"])
+        let p = g.location(in: self)
+        mouse("rclick", at: p, extra: ["b": "right"])
+        ripple(at: p, color: .systemOrange)
         haptic(.medium)
     }
 
     @objc private func longPressed(_ g: UILongPressGestureRecognizer) {
         let p = g.location(in: self)
-        switch g.state {
-        case .began:
-            dragging = true
-            if mode == .touch { mouse("move", at: p) }
-            mouse("down", at: p)
-            haptic(.heavy)
-            lastPan = p
-        case .changed:
-            if mode == .touch {
-                throttledMove(p)
-            } else {
+        switch mode {
+        case .touch:
+            // Press & hold = right click (like Windows touch).
+            if g.state == .began {
+                mouse("rclick", at: p, extra: ["b": "right"])
+                ripple(at: p, color: .systemOrange)
+                haptic(.heavy)
+            }
+        case .trackpad:
+            // Hold, then move = drag.
+            switch g.state {
+            case .began:
+                dragActive = true
+                mouse("down", at: nil)
+                haptic(.heavy)
+                lastPan = p
+            case .changed:
                 relMove(CGPoint(x: p.x - lastPan.x, y: p.y - lastPan.y))
                 lastPan = p
+            default:
+                flushRel()
+                mouse("up", at: nil)
+                dragActive = false
             }
-        default:
-            flushRel()
-            mouse("up", at: mode == .touch ? p : nil)
-            dragging = false
         }
     }
-
-    private var lastPan: CGPoint = .zero
 
     @objc private func panned(_ g: UIPanGestureRecognizer) {
         let p = g.location(in: self)
         switch mode {
         case .touch:
-            if g.state == .changed || g.state == .began { throttledMove(p) }
+            switch g.state {
+            case .began:
+                // Press where the finger first touched, then drag.
+                let t = g.translation(in: self)
+                let origin = CGPoint(x: p.x - t.x, y: p.y - t.y)
+                mouse("move", at: origin)
+                mouse("down", at: origin)
+                dragActive = true
+                throttledMove(p, force: true)
+            case .changed:
+                throttledMove(p)
+            default:
+                mouse("move", at: p)
+                mouse("up", at: p)
+                dragActive = false
+            }
         case .trackpad:
             let t = g.translation(in: self)
             g.setTranslation(.zero, in: self)
             relMove(t)
-            if g.state == .ended { flushRel() }
+            if g.state == .ended || g.state == .cancelled { flushRel() }
         }
     }
 
     @objc private func scrolled(_ g: UIPanGestureRecognizer) {
         let t = g.translation(in: self)
         g.setTranslation(.zero, in: self)
-        let point: CGPoint? = g.state == .began ? g.location(in: self) : nil
-        mouse("scroll", at: point, extra: ["dx": Double(t.x * 2), "dy": Double(t.y * 2)])
-    }
-
-    @objc private func pinched(_ g: UIPinchGestureRecognizer) {
-        guard g.numberOfTouches == 2 || g.state == .ended else { return }
-        let center = g.location(in: self)
-        if g.state == .changed {
-            let newZoom = min(max(zoom * g.scale, 1), 5)
-            let factor = newZoom / zoom
-            // Zoom around the pinch center.
-            offset = CGPoint(x: center.x - (center.x - offset.x) * factor - bounds.midX * (1 - factor) * 0,
-                             y: center.y - (center.y - offset.y) * factor)
-            zoom = newZoom
-            if zoom <= 1.01 { offset = .zero }
-            g.scale = 1
+        if zoom > 1.01 {
+            // Zoomed in: two fingers move the magnified view.
+            offset.x += t.x
+            offset.y += t.y
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             applyZoom()
             CATransaction.commit()
+            return
+        }
+        let point: CGPoint? = (g.state == .began && mode == .touch) ? g.location(in: self) : nil
+        mouse("scroll", at: point, extra: ["dx": Double(t.x * 2), "dy": Double(t.y * 2)])
+        if g.state == .ended {
+            let v = g.velocity(in: self)
+            if hypot(v.x, v.y) > 250 { startMomentum(v) }
         }
     }
 
-    private func throttledMove(_ p: CGPoint) {
+    /// Keep scrolling after a flick, slowing down like iOS does.
+    private func startMomentum(_ velocity: CGPoint) {
+        stopMomentum()
+        scrollVelocity = velocity
+        lastMomentumTime = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(momentumStep))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        momentumLink = link
+    }
+
+    @objc private func momentumStep() {
         let now = CACurrentMediaTime()
-        guard now - lastMoveSent > 1.0 / 60.0 else { return }
+        let dt = min(now - lastMomentumTime, 0.05)
+        lastMomentumTime = now
+        scrollVelocity.x *= pow(0.12, dt)   // ~ iOS deceleration
+        scrollVelocity.y *= pow(0.12, dt)
+        guard hypot(scrollVelocity.x, scrollVelocity.y) > 30 else { return stopMomentum() }
+        send?(["t": "mouse", "a": "scroll", "dx": Double(scrollVelocity.x * dt * 2), "dy": Double(scrollVelocity.y * dt * 2)])
+    }
+
+    private func stopMomentum() {
+        momentumLink?.invalidate()
+        momentumLink = nil
+    }
+
+    @objc private func pinched(_ g: UIPinchGestureRecognizer) {
+        guard g.state == .changed, g.numberOfTouches == 2 else { return }
+        let center = g.location(in: self)
+        let newZoom = min(max(zoom * g.scale, 1), 5)
+        let factor = newZoom / zoom
+        let mid = CGPoint(x: bounds.midX, y: bounds.midY)
+        // Keep the point under the fingers fixed while zooming (layer scales around its center).
+        offset.x = (offset.x - (center.x - mid.x)) * factor + (center.x - mid.x)
+        offset.y = (offset.y - (center.y - mid.y)) * factor + (center.y - mid.y)
+        zoom = newZoom
+        if zoom <= 1.01 { zoom = 1; offset = .zero }
+        g.scale = 1
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        applyZoom()
+        CATransaction.commit()
+    }
+
+    private func throttledMove(_ p: CGPoint, force: Bool = false) {
+        let now = CACurrentMediaTime()
+        guard force || now - lastMoveSent > 1.0 / 120.0 else { return }
         lastMoveSent = now
         mouse("move", at: p)
     }
@@ -306,7 +387,7 @@ final class RemoteSurfaceView: UIView, UIGestureRecognizerDelegate {
         pendingRel.x += delta.x * sensitivity
         pendingRel.y += delta.y * sensitivity
         let now = CACurrentMediaTime()
-        guard now - lastMoveSent > 1.0 / 60.0 else { return }
+        guard now - lastMoveSent > 1.0 / 120.0 else { return }
         flushRel()
     }
 
@@ -315,6 +396,32 @@ final class RemoteSurfaceView: UIView, UIGestureRecognizerDelegate {
         lastMoveSent = CACurrentMediaTime()
         send?(["t": "mouse", "a": "rel", "dx": Double(pendingRel.x), "dy": Double(pendingRel.y)])
         pendingRel = .zero
+    }
+
+    /// Instant visual feedback where the finger touched (masks network latency).
+    private func ripple(at point: CGPoint, color: UIColor = .white) {
+        let size: CGFloat = 44
+        let ring = CAShapeLayer()
+        ring.path = UIBezierPath(ovalIn: CGRect(x: -size / 2, y: -size / 2, width: size, height: size)).cgPath
+        ring.position = point
+        ring.fillColor = color.withAlphaComponent(0.25).cgColor
+        ring.strokeColor = color.withAlphaComponent(0.9).cgColor
+        ring.lineWidth = 2
+        layer.addSublayer(ring)
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 0.4
+        scale.toValue = 1.3
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        let group = CAAnimationGroup()
+        group.animations = [scale, fade]
+        group.duration = 0.35
+        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        group.isRemovedOnCompletion = false
+        group.fillMode = .forwards
+        ring.add(group, forKey: "ripple")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { ring.removeFromSuperlayer() }
     }
 
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {

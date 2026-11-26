@@ -4,6 +4,7 @@ struct HomeView: View {
     @EnvironmentObject private var store: MacStore
     @State private var showAdd = false
     @State private var showSettings = false
+    @State private var showClips = false
     @State private var appeared = false
 
     var body: some View {
@@ -37,6 +38,7 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showAdd) { AddMacView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .fullScreenCover(isPresented: $showClips) { ClipsGalleryView() }
             .onAppear { appeared = true }
         }
     }
@@ -50,6 +52,12 @@ struct HomeView: View {
             }
             .layoutPriority(1)
             Spacer(minLength: 8)
+            Button { showClips = true } label: {
+                Image(systemName: "film.stack").font(.system(size: 17, weight: .semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .glass(in: Circle(), interactive: true)
+            .disabled(store.macs.isEmpty)
             Button { showSettings = true } label: {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 17, weight: .semibold))
                     .frame(width: 44, height: 44)

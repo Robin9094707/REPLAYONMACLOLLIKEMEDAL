@@ -43,7 +43,20 @@ final class AppState: ObservableObject {
     private var registeredScreenshotKey: KeyCombo?
     private var longKeyActive = false
     private var registeredMaximizeKey: KeyCombo?
+    private var registeredRecordKey: KeyCombo?
     private var lastAnnouncedPID: pid_t = 0
+    /// Process whose footage is currently in the replay buffer (-1 = whole screen).
+    private var bufferOwnerPID: pid_t = -2
+
+    private func discardBuffer(reason: String) {
+        guard engine.buffer.bufferedSeconds > 0 || bufferOwnerPID != -2 else { return }
+        engine.buffer.clear()
+        bufferedSeconds = 0
+        bufferOwnerPID = -2
+        activeGameName = nil
+        lastAnnouncedPID = 0
+        DiagnosticsLog.write("replay buffer discarded (\(reason))")
+    }
     private var lastFolderPath = ""
     private var tickCount = 0
 
@@ -188,8 +201,17 @@ final class AppState: ObservableObject {
         let game = detector.currentGame
         if settings.recordingMode == .gamesOnly && game == nil {
             await stopEngine()
+            // Game closed → its replay is gone. A clip can never contain the previous game.
+            discardBuffer(reason: "Spiel beendet")
             status = .waitingForGame
             return
+        }
+
+        // Different game (or game ↔ screen) than the buffered footage → start fresh.
+        let owner = game?.pid ?? -1
+        if owner != bufferOwnerPID {
+            discardBuffer(reason: "neues Spiel")
+            bufferOwnerPID = owner
         }
 
         let config = makeConfig()
@@ -285,6 +307,12 @@ final class AppState: ObservableObject {
                 longKeyActive = false
             }
         }
+        if registeredRecordKey != settings.recordHotKey {
+            registeredRecordKey = settings.recordHotKey
+            HotKeyCenter.shared.register(id: 6, combo: settings.recordHotKey) {
+                Task { @MainActor in ScreenRecorder.shared.toggle() }
+            }
+        }
         if registeredMaximizeKey != settings.maximizeHotKey {
             registeredMaximizeKey = settings.maximizeHotKey
             HotKeyCenter.shared.register(id: 5, combo: settings.maximizeHotKey) {
@@ -307,6 +335,7 @@ final class AppState: ObservableObject {
         registeredLongKey = nil
         registeredScreenshotKey = nil
         registeredMaximizeKey = nil
+        registeredRecordKey = nil
         longKeyActive = false
     }
 
@@ -384,6 +413,9 @@ final class AppState: ObservableObject {
             }
             if settings.revealAfterSave {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+            if RemoteConfig.shared.autoUpload && ClipUploader.shared.isAvailable {
+                ClipUploader.shared.upload(url, game: gameName)
             }
             if settings.showNotifications {
                 NotificationManager.shared.notify(title: "Clip gespeichert 🎬",

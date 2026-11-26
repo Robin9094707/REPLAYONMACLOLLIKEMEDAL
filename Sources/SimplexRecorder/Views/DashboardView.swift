@@ -94,6 +94,7 @@ struct DashboardView: View {
                     open { WindowManager.shared.showSettings(tab: .clips) }
                 }
             }
+            RecordRow { action in open(action) }
             if let app = detector.frontmostApp {
                 Divider().opacity(0.5)
                 HStack(spacing: 8) {
@@ -360,5 +361,43 @@ struct RemoteBadge: View {
         case .error: return .red
         case .off: return .secondary
         }
+    }
+}
+
+/// Start/stop the classic screen recording from the dashboard.
+struct RecordRow: View {
+    @ObservedObject private var recorder = ScreenRecorder.shared
+    @EnvironmentObject private var settings: AppSettings
+    let open: (@escaping @MainActor () -> Void) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if recorder.isRecording {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Button {
+                        Task { await recorder.stop() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "stop.circle.fill")
+                            Text("Aufnahme stoppen · \(recorder.elapsedText)").monospacedDigit()
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(.white)
+                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.red))
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                DashButton(symbol: "record.circle", title: "Bildschirm aufnehmen", tint: .red) {
+                    open { ScreenRecorder.shared.startFullScreen() }
+                }
+                DashButton(symbol: "rectangle.dashed", title: "Bereich aufnehmen", tint: .orange) {
+                    open { ScreenRecorder.shared.startRegion() }
+                }
+            }
+        }
+        .help("Bildschirmaufnahme starten/stoppen: \(settings.recordHotKey.displayString)")
     }
 }

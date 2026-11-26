@@ -189,7 +189,7 @@ final class ReplayEngine: NSObject, SCStreamOutput, SCStreamDelegate {
         sc.height = height
         sc.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         sc.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        sc.queueDepth = 6
+        sc.queueDepth = 8
         sc.showsCursor = config.showCursor
         sc.scalesToFit = true
         sc.preservesAspectRatio = true

@@ -68,8 +68,11 @@ final class InputInjector {
         case "scroll":
             let dx = Int32(msg["dx"] as? Double ?? 0), dy = Int32(msg["dy"] as? Double ?? 0)
             if hasPosition { post(.mouseMoved, at: p) }
-            CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)?
-                .post(tap: .cghidEventTap)
+            if let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) {
+                // Continuous = trackpad-style smooth scrolling instead of mouse-wheel steps.
+                event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                event.post(tap: .cghidEventTap)
+            }
         default:
             break
         }

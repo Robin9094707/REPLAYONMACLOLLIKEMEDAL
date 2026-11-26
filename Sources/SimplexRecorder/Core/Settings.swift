@@ -80,6 +80,10 @@ struct KeyCombo: Codable, Equatable {
         keyCode: UInt32(kVK_ANSI_X),
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
         keyLabel: "X")
+    static let defaultRecord = KeyCombo(
+        keyCode: UInt32(kVK_ANSI_R),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
+        keyLabel: "R")
     static let defaultMaximize = KeyCombo(
         keyCode: UInt32(kVK_ANSI_F),
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue,
@@ -235,6 +239,7 @@ final class AppSettings: ObservableObject {
     @Published var autoMaximizeGames: Bool { didSet { d.set(autoMaximizeGames, forKey: K.autoMaximize) } }
     @Published var showStartAnimation: Bool { didSet { d.set(showStartAnimation, forKey: K.startAnimation) } }
     @Published var maximizeHotKey: KeyCombo { didSet { saveCodable(maximizeHotKey, K.maximizeHotKey) } }
+    @Published var recordHotKey: KeyCombo { didSet { saveCodable(recordHotKey, "recordHotKey") } }
 
     private init() {
         let d = UserDefaults.standard
@@ -310,6 +315,7 @@ final class AppSettings: ObservableObject {
         autoMaximizeGames = d.bool(forKey: K.autoMaximize)
         showStartAnimation = d.bool(forKey: K.startAnimation)
         maximizeHotKey = AppSettings.loadCodable(d, K.maximizeHotKey) ?? .defaultMaximize
+        recordHotKey = AppSettings.loadCodable(d, "recordHotKey") ?? .defaultRecord
 
         // Migration: v2 makes "game window only" the default capture mode.
         if d.integer(forKey: K.settingsVersion) < 2 {

@@ -5,6 +5,7 @@ import VirtualDisplayBridge
 struct RemoteSettingsView: View {
     @ObservedObject private var config = RemoteConfig.shared
     @ObservedObject private var agent = RemoteAgent.shared
+    @ObservedObject private var uploader = ClipUploader.shared
     @State private var showPassword = false
     @State private var copied = false
     @State private var draftServer = RemoteConfig.shared.serverURL
@@ -107,6 +108,33 @@ struct RemoteSettingsView: View {
             } header: {
                 Text("Kopplung")
             }
+
+            Section {
+                Toggle("Clips auf diesen Server hochladen können", isOn: $config.uploadEnabled)
+                if config.uploadEnabled {
+                    Toggle("Jeden neuen Clip automatisch hochladen", isOn: $config.autoUpload)
+                    Toggle("Danach Link in die Zwischenablage kopieren", isOn: $config.copyLinkAfterUpload)
+                    if let storage = uploader.storage {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Server-Speicher").font(.callout.weight(.semibold))
+                                Spacer()
+                                Text("\(storage.used.formattedBytes) von \(storage.limit.formattedBytes) · \(storage.count) Clips")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            ProgressView(value: Double(storage.used), total: Double(max(storage.limit, 1)))
+                            Text("Auf der Server-Festplatte frei: \(storage.diskFree.formattedBytes)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("Clips teilen")
+            } footer: {
+                Text("Hochgeladene Clips bekommen einen Link, den jeder im Browser ohne Anmeldung abspielen kann – Discord & Co. zeigen ihn direkt als Video. HEVC-Clips werden dafür automatisch in H.264 umgewandelt. Geteilte Clips sind nicht Ende-zu-Ende verschlüsselt. Verwalten und löschen kannst du sie in der iPhone-App.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .task { await uploader.refreshStorage() }
 
             Section {
                 PermissionRow(title: "Bedienungshilfen",

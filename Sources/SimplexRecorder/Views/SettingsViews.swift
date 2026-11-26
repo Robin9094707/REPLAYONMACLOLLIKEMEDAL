@@ -269,6 +269,7 @@ struct HotKeySettingsView: View {
                 }
                 .disabled(!settings.longClipEnabled)
                 LabeledContent("Screenshot") { HotKeyRecorder(combo: $settings.screenshotHotKey) }
+                LabeledContent("Bildschirmaufnahme starten / stoppen") { HotKeyRecorder(combo: $settings.recordHotKey) }
                 LabeledContent("Spielfenster einpassen / wiederherstellen") { HotKeyRecorder(combo: $settings.maximizeHotKey) }
                 LabeledContent("Aufnahme pausieren / fortsetzen") { HotKeyRecorder(combo: $settings.pauseHotKey) }
             } header: {
@@ -285,6 +286,7 @@ struct HotKeySettingsView: View {
                     settings.longClipHotKey = .defaultLongClip
                     settings.screenshotHotKey = .defaultScreenshot
                     settings.maximizeHotKey = .defaultMaximize
+                    settings.recordHotKey = .defaultRecord
                     AppState.shared.registerHotKeys()
                 }
             } footer: {
