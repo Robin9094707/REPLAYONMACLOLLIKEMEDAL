@@ -10,7 +10,6 @@ struct SimplexRemoteApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                AuroraBackground()
                 HomeView()
                     .opacity(showSplash ? 0 : 1)
                     .scaleEffect(showSplash ? 0.96 : 1)
@@ -21,16 +20,20 @@ struct SimplexRemoteApp: App {
                 if let toast = store.toast {
                     VStack {
                         Text(toast)
+                            .multilineTextAlignment(.center)
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, 18).padding(.vertical, 12)
                             .glassCapsule()
                             .padding(.top, 8)
+                            .padding(.horizontal, 20)
                         Spacer()
                     }
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(10)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background { AuroraBackground() }
             .environmentObject(store)
             .preferredColorScheme(.dark)
             .onAppear {

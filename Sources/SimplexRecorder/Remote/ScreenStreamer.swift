@@ -57,7 +57,7 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate {
         config.height = h
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, options.fps)))
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        config.queueDepth = 4
+        config.queueDepth = 3
         config.showsCursor = options.showCursor
         config.capturesAudio = false
 
@@ -90,6 +90,18 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate {
         queue.async { self.forceKeyframe = true }
     }
 
+    /// Live bitrate change (adaptive streaming) – no restart, no new keyframe needed.
+    func setBitrate(kbps: Int) {
+        queue.async {
+            guard let encoder = self.encoder else { return }
+            VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: kbps * 1000))
+            // Cap short bursts at ~1.5× the average over one second.
+            let bytesPerSecond = Double(kbps) * 1000 / 8 * 1.5
+            let limits = [NSNumber(value: bytesPerSecond), NSNumber(value: 1.0)] as CFArray
+            VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_DataRateLimits, value: limits)
+        }
+    }
+
     var dimensions: (Int, Int) { size }
 
     // MARK: Encoder
@@ -108,6 +120,7 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Main_AutoLevel)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: kbps * 1000))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: fps))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: NSNumber(value: 4))

@@ -10,6 +10,8 @@ final class VideoDecoder {
     private let queue = DispatchQueue(label: "com.simplex.remote.decode", qos: .userInteractive)
     var onSize: ((CGSize) -> Void)?
     var needsKeyframe: (() -> Void)?
+    /// Called on the main thread after a frame was handed to the display (sequence number, keyframe).
+    var onFrame: ((UInt64, Bool) -> Void)?
     private var lastSize: CGSize = .zero
     private var waitingForKeyframe = true
 
@@ -34,6 +36,8 @@ final class VideoDecoder {
         let bytes = [UInt8](packet)
         guard bytes.count > 13 else { return }
         let keyframe = bytes[0] & 1 == 1
+        var seq: UInt64 = 0
+        for i in 1...8 { seq = seq << 8 | UInt64(bytes[i]) }
         let width = Int(bytes[9]) << 8 | Int(bytes[10])
         let height = Int(bytes[11]) << 8 | Int(bytes[12])
         var index = 13
@@ -100,6 +104,7 @@ final class VideoDecoder {
                 return
             }
             renderer.enqueue(sample)
+            self.onFrame?(seq, keyframe)
         }
     }
 }

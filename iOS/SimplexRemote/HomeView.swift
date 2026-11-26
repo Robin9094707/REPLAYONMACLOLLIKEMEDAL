@@ -25,10 +25,13 @@ struct HomeView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 20)
                 .padding(.bottom, 40)
+                .readableWidth()
             }
-            .scrollContentBackground(.hidden)
+            .scrollIndicators(.hidden)
+            .background { AuroraBackground() }
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: PairedMac.self) { mac in
                 MacDetailView(mac: mac)
             }
@@ -42,9 +45,11 @@ struct HomeView: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Meine Macs").font(.system(size: 34, weight: .heavy, design: .rounded))
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
             }
-            Spacer()
+            .layoutPriority(1)
+            Spacer(minLength: 8)
             Button { showSettings = true } label: {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 17, weight: .semibold))
                     .frame(width: 44, height: 44)
@@ -159,7 +164,7 @@ struct MacCard: View {
         if online, let status { return "Online · läuft seit \(status.uptimeText)" }
         if online { return "Online" }
         if let seen = store.presence[mac.id]?.lastSeen {
-            return "Offline · zuletzt \(seen.formatted(.relative(presentation: .named)))"
+            return "Offline · zuletzt \(seen.relativeGerman)"
         }
         switch store.serverState(for: mac) {
         case .failed(let message): return message

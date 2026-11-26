@@ -50,6 +50,22 @@ final class RemoteAgent: ObservableObject {
     nonisolated(unsafe) private var sendTask: URLSessionWebSocketTask?
     nonisolated(unsafe) private var sendCrypto: RemoteCrypto?
 
+    // Adaptive streaming: the phone acknowledges frames by sequence number. Frames older
+    // than the latency budget are skipped and the bitrate follows the connection.
+    nonisolated(unsafe) private var frameSeq: UInt64 = 0
+    nonisolated(unsafe) private var ackedSeq: UInt64 = 0
+    nonisolated(unsafe) private var acksSeen = false
+    nonisolated(unsafe) private var sentTimes: [UInt64: TimeInterval] = [:]
+    nonisolated(unsafe) private var droppedFrames = 0
+    nonisolated(unsafe) private var sentBytes = 0
+    private var rttMs: Double = 0
+    private var currentKbps = 4500
+    private var targetKbps = 4500
+    private var streamFPS = 30
+    private var stableSeconds = 0
+    private var adaptTimer: Timer?
+    private static let latencyBudget: TimeInterval = 0.35
+
     private var config: RemoteConfig { RemoteConfig.shared }
 
     // MARK: Lifecycle
@@ -243,6 +259,8 @@ final class RemoteAgent: ObservableObject {
             stopStreaming()
         case "keyframe":
             streamer.requestKeyframe()
+        case "ack":
+            if let seq = (msg["seq"] as? NSNumber)?.uint64Value { handleAck(seq) }
         case "mouse":
             if control { injector.handleMouse(msg) }
         case "text":
@@ -304,23 +322,49 @@ final class RemoteAgent: ObservableObject {
         sendEncrypted(.control, ["t": "toast", "s": text])
     }
 
-    /// Called on the encoder thread. Drops frames when the connection can't keep up.
+    /// Called on the encoder thread. Skips frames when the connection can't keep up, so the
+    /// picture on the phone stays live instead of lagging behind.
     nonisolated private func sendVideo(_ packet: Data, keyframe: Bool) {
+        let now = ProcessInfo.processInfo.systemUptime
         sendLock.lock()
         let task = sendTask, crypto = sendCrypto
-        if inflight > 4 && !keyframe {
+        var tooLate = false
+        if acksSeen {
+            // Oldest frame the phone hasn't confirmed yet.
+            if let oldest = sentTimes[ackedSeq + 1], now - oldest > Self.latencyBudget { tooLate = true }
+        } else if inflight > 4 {
+            tooLate = true
+        }
+        if !keyframe && (tooLate || waitingForKeyframe) {
             waitingForKeyframe = true
+            droppedFrames += 1
             sendLock.unlock()
             return
         }
-        if waitingForKeyframe && !keyframe {
+        if keyframe && tooLate && sentTimes.count > Int(Self.latencyBudget * 120) {
+            // Even keyframes wait while the pipe is completely clogged.
+            droppedFrames += 1
             sendLock.unlock()
             return
         }
         waitingForKeyframe = false
+        frameSeq += 1
+        let seq = frameSeq
+        sentTimes[seq] = now
+        if sentTimes.count > 600 {
+            let floor = seq > 300 ? seq - 300 : 0
+            sentTimes = sentTimes.filter { $0.key > floor }
+        }
         inflight += 1
+        sentBytes += packet.count
         sendLock.unlock()
-        guard let task, let crypto, let sealed = crypto.seal(.video, packet) else {
+
+        // Bytes 1…8 carry the frame sequence number (the phone acknowledges it).
+        var stamped = packet
+        var seqBE = seq.bigEndian
+        withUnsafeBytes(of: &seqBE) { stamped.replaceSubrange(1..<9, with: $0) }
+
+        guard let task, let crypto, let sealed = crypto.seal(.video, stamped) else {
             sendLock.lock(); inflight -= 1; sendLock.unlock()
             return
         }
@@ -328,12 +372,54 @@ final class RemoteAgent: ObservableObject {
             guard let self else { return }
             self.sendLock.lock()
             self.inflight -= 1
-            let recovered = self.waitingForKeyframe && self.inflight < 2
+            let recovered = !self.acksSeen && self.waitingForKeyframe && self.inflight < 2
             self.sendLock.unlock()
             if recovered {
                 Task { @MainActor in RemoteAgent.shared.streamer.requestKeyframe() }
             }
         }
+    }
+
+    /// The phone confirmed frames up to `seq`.
+    private func handleAck(_ seq: UInt64) {
+        let now = ProcessInfo.processInfo.systemUptime
+        sendLock.lock()
+        acksSeen = true
+        var rtt: Double?
+        if seq > ackedSeq {
+            if let sent = sentTimes[seq] { rtt = (now - sent) * 1000 }
+            ackedSeq = seq
+            sentTimes = sentTimes.filter { $0.key > seq }
+        }
+        let caughtUp = waitingForKeyframe && sentTimes.count < 3
+        sendLock.unlock()
+        if let rtt { rttMs = rttMs == 0 ? rtt : rttMs * 0.8 + rtt * 0.2 }
+        if caughtUp { streamer.requestKeyframe() }
+    }
+
+    /// Once per second: follow the connection (AIMD – drop fast, climb slowly).
+    private func adaptBitrate() {
+        sendLock.lock()
+        let dropped = droppedFrames
+        let bytes = sentBytes
+        droppedFrames = 0
+        sentBytes = 0
+        sendLock.unlock()
+
+        let congested = dropped > 0 || rttMs > 300
+        if congested {
+            currentKbps = max(600, Int(Double(currentKbps) * 0.7))
+            stableSeconds = 0
+            streamer.setBitrate(kbps: currentKbps)
+        } else {
+            stableSeconds += 1
+            if stableSeconds >= 3 && rttMs < 180 && currentKbps < targetKbps {
+                currentKbps = min(targetKbps, Int(Double(currentKbps) * 1.15) + 100)
+                streamer.setBitrate(kbps: currentKbps)
+            }
+        }
+        sendEncrypted(.control, ["t": "net", "kbps": currentKbps, "actualKbps": bytes * 8 / 1000,
+                                 "rtt": Int(rttMs), "dropped": dropped, "fps": streamFPS])
     }
 
     // MARK: Status
@@ -458,8 +544,15 @@ final class RemoteAgent: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(900)) // let macOS set the display up
             }
             self.injector.displayID = displayID
+            self.resetAdaptiveState(kbps: kbps, fps: fps)
             do {
-                try await self.streamer.start(.init(displayID: displayID, maxWidth: maxWidth, fps: fps, kbps: kbps))
+                try await self.streamer.start(.init(displayID: displayID, maxWidth: maxWidth, fps: fps, kbps: self.currentKbps))
+                self.adaptTimer?.invalidate()
+                let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                    Task { @MainActor in RemoteAgent.shared.adaptBitrate() }
+                }
+                timer.tolerance = 0.1
+                self.adaptTimer = timer
                 self.streaming = true
                 self.streamMode = mode
                 let (w, h) = self.streamer.dimensions
@@ -479,11 +572,32 @@ final class RemoteAgent: ObservableObject {
 
     private func stopStreamingAsync(keepDisplay: Bool) async {
         guard streaming || virtualDisplay != nil else { return }
+        adaptTimer?.invalidate()
+        adaptTimer = nil
         await streamer.stop()
         streaming = false
         injector.displayID = CGMainDisplayID()
         if !keepDisplay { destroyVirtualDisplay() }
         DiagnosticsLog.write("remote: streaming stopped")
+    }
+
+    private func resetAdaptiveState(kbps: Int, fps: Int) {
+        sendLock.lock()
+        frameSeq = 0
+        ackedSeq = 0
+        acksSeen = false
+        sentTimes = [:]
+        droppedFrames = 0
+        sentBytes = 0
+        waitingForKeyframe = false
+        inflight = 0
+        sendLock.unlock()
+        rttMs = 0
+        targetKbps = kbps
+        // Start a bit below the target and climb – avoids a burst of lag right at the start.
+        currentKbps = max(800, Int(Double(kbps) * 0.6))
+        streamFPS = fps
+        stableSeconds = 0
     }
 
     /// Creates a virtual monitor shaped like the phone (scaled up so the desktop is usable).

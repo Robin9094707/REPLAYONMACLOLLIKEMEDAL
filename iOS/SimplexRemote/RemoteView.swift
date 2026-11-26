@@ -92,6 +92,17 @@ struct RemoteView: View {
 
             Spacer()
 
+            if session.net.kbps > 0 {
+                HStack(spacing: 5) {
+                    Image(systemName: "cellularbars", variableValue: Double(session.net.quality) / 3)
+                        .foregroundStyle(session.net.quality >= 2 ? Color.green : (session.net.quality == 1 ? Color.orange : Color.red))
+                    Text(session.net.text).font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
+                }
+                .padding(.horizontal, 10).frame(height: 32)
+                .glassCapsule(interactive: false)
+                .transition(.opacity)
+            }
+
             Button { session.sendClipboard() } label: {
                 Image(systemName: "doc.on.clipboard").frame(width: 40, height: 40)
             }

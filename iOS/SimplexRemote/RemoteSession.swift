@@ -37,9 +37,10 @@ enum StreamQuality: String, CaseIterable, Identifiable {
         case .sharp: return "Gestochen scharf"
         }
     }
-    var kbps: Int { [.saver: 2000, .balanced: 4500, .sharp: 12000][self] ?? 4500 }
-    var fps: Int { self == .sharp ? 60 : 30 }
-    var maxWidth: Int { [.saver: 1280, .balanced: 1680, .sharp: 2560][self] ?? 1680 }
+    /// Upper limit – the Mac adapts the real bitrate to the connection automatically.
+    var kbps: Int { [.saver: 2500, .balanced: 9000, .sharp: 18000][self] ?? 9000 }
+    var fps: Int { self == .saver ? 30 : 60 }
+    var maxWidth: Int { [.saver: 1280, .balanced: 1920, .sharp: 2560][self] ?? 1920 }
 }
 
 /// A live remote-control session with one Mac.
@@ -58,6 +59,9 @@ final class RemoteSession: ObservableObject {
     @Published var keyboardVisible = false
     @Published var activeModifiers: Set<String> = []
     @Published var autoClipboard = true
+    @Published var net = NetStats()
+    private var lastAckTime: CFTimeInterval = 0
+    private var frameTimes: [CFTimeInterval] = []
 
     init(mac: PairedMac, store: MacStore, mode: DisplayMode, quality: StreamQuality) {
         self.mac = mac
@@ -66,6 +70,7 @@ final class RemoteSession: ObservableObject {
         self.quality = quality
         surface.send = { [weak self] msg in self?.send(msg) }
         surface.decoder.needsKeyframe = { [weak self] in self?.send(["t": "keyframe"]) }
+        surface.decoder.onFrame = { [weak self] seq, keyframe in self?.frameShown(seq, keyframe: keyframe) }
         surface.keyInput.onText = { [weak self] text in self?.typeText(text) }
         surface.keyInput.onKey = { [weak self] key, mods in self?.press(key, modifiers: mods) }
     }
@@ -108,8 +113,26 @@ final class RemoteSession: ObservableObject {
               "fps": quality.fps, "kbps": quality.kbps, "maxWidth": quality.maxWidth])
     }
 
+    /// Acknowledge frames so the Mac can keep latency low and adapt the bitrate.
+    private func frameShown(_ seq: UInt64, keyframe: Bool) {
+        let now = CACurrentMediaTime()
+        frameTimes.append(now)
+        frameTimes.removeAll { now - $0 > 1 }
+        if keyframe || now - lastAckTime > 0.05 {
+            lastAckTime = now
+            send(["t": "ack", "seq": seq])
+        }
+        if connecting { connecting = false }
+    }
+
     private func handleControl(_ json: [String: Any]) {
         switch json["t"] as? String {
+        case "net":
+            net = NetStats(kbps: (json["actualKbps"] as? NSNumber)?.intValue ?? 0,
+                           targetKbps: (json["kbps"] as? NSNumber)?.intValue ?? 0,
+                           rtt: (json["rtt"] as? NSNumber)?.intValue ?? 0,
+                           dropped: (json["dropped"] as? NSNumber)?.intValue ?? 0,
+                           fps: frameTimes.count)
         case "stream":
             streaming = true
             connecting = false
@@ -165,5 +188,26 @@ final class RemoteSession: ObservableObject {
         }
         send(["t": "clip", "s": text])
         store.toast = "📋 Zwischenablage an den Mac gesendet"
+    }
+}
+
+struct NetStats: Equatable {
+    var kbps = 0
+    var targetKbps = 0
+    var rtt = 0
+    var dropped = 0
+    var fps = 0
+
+    /// 0…3 bars.
+    var quality: Int {
+        if kbps == 0 && rtt == 0 { return 0 }
+        if rtt < 80 && dropped == 0 { return 3 }
+        if rtt < 200 { return 2 }
+        return 1
+    }
+
+    var text: String {
+        let mbit = Double(kbps) / 1000
+        return String(format: "%.1f Mbit/s · %d ms · %d fps", mbit, rtt, fps)
     }
 }

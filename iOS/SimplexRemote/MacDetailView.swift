@@ -41,9 +41,12 @@ struct MacDetailView: View {
                     offlineCard
                 }
             }
-            .padding(18)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .readableWidth()
         }
-        .background(AuroraBackground())
+        .scrollIndicators(.hidden)
+        .background { AuroraBackground() }
         .navigationTitle(mac.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

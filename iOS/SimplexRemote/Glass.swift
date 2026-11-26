@@ -50,28 +50,35 @@ extension View {
 struct AuroraBackground: View {
     @State private var animate = false
 
-    // Radial gradients instead of blurred shapes: same soft look, a fraction of the GPU cost.
+    // Drawn as an overlay of a plain color, so the blobs can never widen the layout.
+    // Radial gradients instead of blur: same soft look, a fraction of the GPU cost.
     var body: some View {
-        ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.09)
-            blob(Color(red: 0.45, green: 0.3, blue: 1.0), size: 620)
-                .offset(x: animate ? -110 : -50, y: animate ? -250 : -190)
-            blob(Color(red: 1.0, green: 0.3, blue: 0.5), size: 540)
-                .offset(x: animate ? 130 : 70, y: animate ? 60 : 150)
-            blob(Color(red: 0.2, green: 0.7, blue: 1.0), size: 500)
-                .offset(x: animate ? -50 : 70, y: animate ? 360 : 280)
-        }
-        .drawingGroup()
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) { animate = true }
-        }
+        Color(red: 0.04, green: 0.04, blue: 0.09)
+            .overlay {
+                GeometryReader { geo in
+                    let w = geo.size.width, h = geo.size.height
+                    ZStack {
+                        blob(Color(red: 0.45, green: 0.3, blue: 1.0), size: w * 1.4)
+                            .position(x: w * (animate ? 0.15 : 0.3), y: h * (animate ? 0.08 : 0.16))
+                        blob(Color(red: 1.0, green: 0.3, blue: 0.5), size: w * 1.25)
+                            .position(x: w * (animate ? 0.85 : 0.7), y: h * (animate ? 0.5 : 0.6))
+                        blob(Color(red: 0.2, green: 0.7, blue: 1.0), size: w * 1.15)
+                            .position(x: w * (animate ? 0.35 : 0.6), y: h * (animate ? 0.95 : 0.85))
+                    }
+                }
+                .drawingGroup()
+            }
+            .clipped()
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) { animate = true }
+            }
     }
 
     private func blob(_ color: Color, size: CGFloat) -> some View {
         Circle()
-            .fill(RadialGradient(colors: [color.opacity(0.55), color.opacity(0)], center: .center,
+            .fill(RadialGradient(colors: [color.opacity(0.5), color.opacity(0)], center: .center,
                                  startRadius: 0, endRadius: size / 2))
             .frame(width: size, height: size)
     }
@@ -146,5 +153,19 @@ struct PulseDot: View {
 extension Double {
     var bytesText: String {
         ByteCountFormatter.string(fromByteCount: Int64(self), countStyle: .memory)
+    }
+}
+
+/// German relative dates ("vor 5 Stunden").
+extension Date {
+    var relativeGerman: String {
+        formatted(.relative(presentation: .named).locale(Locale(identifier: "de_DE")))
+    }
+}
+
+extension View {
+    /// Keeps content readable on wide screens (landscape, iPad) and centered.
+    func readableWidth(_ maxWidth: CGFloat = 640) -> some View {
+        frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
     }
 }

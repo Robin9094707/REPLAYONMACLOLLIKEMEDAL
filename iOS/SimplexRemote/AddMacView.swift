@@ -80,6 +80,7 @@ struct AddMacView: View {
                         }
                     }
                     .padding(18)
+                    .readableWidth(560)
                 }
             }
             .navigationTitle("Mac hinzufügen")
