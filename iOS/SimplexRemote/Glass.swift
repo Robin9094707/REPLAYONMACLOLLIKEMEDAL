@@ -48,10 +48,8 @@ extension View {
 // MARK: - Animated background
 
 struct AuroraBackground: View {
-    @State private var animate = false
-
-    // Drawn as an overlay of a plain color, so the blobs can never widen the layout.
-    // Radial gradients instead of blur: same soft look, a fraction of the GPU cost.
+    // Drawn once (no endless animation) and rasterised – costs nothing while scrolling.
+    // An overlay of a plain color, so the blobs can never widen the layout.
     var body: some View {
         Color(red: 0.04, green: 0.04, blue: 0.09)
             .overlay {
@@ -59,11 +57,11 @@ struct AuroraBackground: View {
                     let w = geo.size.width, h = geo.size.height
                     ZStack {
                         blob(Color(red: 0.45, green: 0.3, blue: 1.0), size: w * 1.4)
-                            .position(x: w * (animate ? 0.15 : 0.3), y: h * (animate ? 0.08 : 0.16))
+                            .position(x: w * 0.2, y: h * 0.1)
                         blob(Color(red: 1.0, green: 0.3, blue: 0.5), size: w * 1.25)
-                            .position(x: w * (animate ? 0.85 : 0.7), y: h * (animate ? 0.5 : 0.6))
+                            .position(x: w * 0.85, y: h * 0.55)
                         blob(Color(red: 0.2, green: 0.7, blue: 1.0), size: w * 1.15)
-                            .position(x: w * (animate ? 0.35 : 0.6), y: h * (animate ? 0.95 : 0.85))
+                            .position(x: w * 0.35, y: h * 0.95)
                     }
                 }
                 .drawingGroup()
@@ -71,9 +69,6 @@ struct AuroraBackground: View {
             .clipped()
             .ignoresSafeArea()
             .allowsHitTesting(false)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) { animate = true }
-            }
     }
 
     private func blob(_ color: Color, size: CGFloat) -> some View {
@@ -167,5 +162,48 @@ extension View {
     /// Keeps content readable on wide screens (landscape, iPad) and centered.
     func readableWidth(_ maxWidth: CGFloat = 640) -> some View {
         frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Cached images (thumbnails don't reload while scrolling)
+
+final class ImageCache {
+    static let shared = ImageCache()
+    private let cache = NSCache<NSURL, UIImage>()
+    private init() { cache.countLimit = 300 }
+
+    func image(for url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
+
+    func load(_ url: URL) async -> UIImage? {
+        if let cached = image(for: url) { return cached }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let image = UIImage(data: data) else { return nil }
+        // Decode off the main thread so scrolling stays smooth.
+        let prepared = await image.byPreparingForDisplay() ?? image
+        cache.setObject(prepared, forKey: url as NSURL)
+        return prepared
+    }
+}
+
+struct CachedImage: View {
+    let url: URL?
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+                    .transition(.opacity)
+            } else {
+                Rectangle().fill(.white.opacity(0.06))
+                    .overlay(Image(systemName: "film").foregroundStyle(.secondary))
+            }
+        }
+        .task(id: url) {
+            guard let url else { return }
+            if let cached = ImageCache.shared.image(for: url) { image = cached; return }
+            let loaded = await ImageCache.shared.load(url)
+            withAnimation(.easeOut(duration: 0.2)) { image = loaded }
+        }
     }
 }

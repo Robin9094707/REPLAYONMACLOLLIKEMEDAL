@@ -142,10 +142,11 @@ struct ClipCard: View {
             .fill(hovering ? Color.secondary.opacity(0.12) : Color.secondary.opacity(0.06)))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onTapGesture(count: 2) { NSWorkspace.shared.open(clip.url) }
+        .onTapGesture(count: 2) { ClipEditor.shared.open(clip.url, game: clip.game) }
         .onDrag { NSItemProvider(contentsOf: clip.url) ?? NSItemProvider() }
         .contextMenu {
-            Button("Abspielen") { NSWorkspace.shared.open(clip.url) }
+            Button("Abspielen & zuschneiden") { ClipEditor.shared.open(clip.url, game: clip.game) }
+            Button("Mit QuickTime öffnen") { NSWorkspace.shared.open(clip.url) }
             Button("Im Finder zeigen") { NSWorkspace.shared.activateFileViewerSelecting([clip.url]) }
             if ClipUploader.shared.isAvailable {
                 Button(ClipUploader.shared.link(for: clip.url) == nil ? "Hochladen & Link kopieren" : "Link kopieren") {

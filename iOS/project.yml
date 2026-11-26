@@ -37,6 +37,9 @@ targets:
         UIUserInterfaceStyle: Dark
         NSCameraUsageDescription: "Zum Scannen des Kopplungs-QR-Codes deines Macs."
         NSFaceIDUsageDescription: "Face ID schützt das gespeicherte Mac-Passwort zum Entsperren."
+        NSPhotoLibraryAddUsageDescription: "Damit du Clips in deiner Fotos-App sichern kannst."
+        UIBackgroundModes:
+          - audio
         ITSAppUsesNonExemptEncryption: false
         CFBundleURLTypes:
           - CFBundleURLName: com.simplex.remote

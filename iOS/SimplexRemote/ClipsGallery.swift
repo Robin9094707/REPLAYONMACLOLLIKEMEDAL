@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import Photos
 
 struct ServerClip: Identifiable, Hashable {
     let id: String
@@ -230,14 +231,7 @@ struct ClipTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomTrailing) {
-                AsyncImage(url: clip.thumbURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Rectangle().fill(.white.opacity(0.06))
-                            .overlay(Image(systemName: "film").foregroundStyle(.secondary))
-                    }
-                }
+                CachedImage(url: clip.thumbURL)
                 .frame(height: 100)
                 .frame(maxWidth: .infinity)
                 .clipped()
@@ -263,12 +257,39 @@ struct ClipTile: View {
 // MARK: - Player
 
 struct ClipPlayerView: View {
+    /// Downloads the clip and stores it in the photo library.
+    private func saveToPhotos() async {
+        saving = true
+        defer { saving = false }
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            saveMessage = "Kein Zugriff auf Fotos"
+            return
+        }
+        do {
+            let (temp, _) = try await URLSession.shared.download(from: clip.url)
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(clip.id).mp4")
+            try? FileManager.default.removeItem(at: file)
+            try FileManager.default.moveItem(at: temp, to: file)
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)
+            }
+            try? FileManager.default.removeItem(at: file)
+            saveMessage = "✓ In Fotos gesichert"
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch {
+            saveMessage = "Sichern fehlgeschlagen"
+        }
+    }
+
     let clip: ServerClip
     let onDelete: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
     @State private var confirmDelete = false
     @State private var copied = false
+    @State private var saving = false
+    @State private var saveMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -306,6 +327,20 @@ struct ClipPlayerView: View {
                     .foregroundStyle(.white)
                     .font(.subheadline.weight(.semibold))
 
+                    Button {
+                        Task { await saveToPhotos() }
+                    } label: {
+                        HStack {
+                            if saving { ProgressView().tint(.white) } else { Image(systemName: "square.and.arrow.down") }
+                            Text(saveMessage ?? "In Fotos sichern")
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    }
+                    .glassCapsule()
+                    .foregroundStyle(.white)
+                    .font(.subheadline.weight(.semibold))
+                    .disabled(saving)
+
                     Text("Der Link läuft in jedem Browser ohne Anmeldung – Discord, WhatsApp & Co. zeigen ihn direkt als Video an.")
                         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
 
@@ -323,12 +358,18 @@ struct ClipPlayerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } } }
             .onAppear {
+                // Play with sound even when the silent switch is on (like YouTube).
+                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+                try? AVAudioSession.sharedInstance().setActive(true)
                 let p = AVPlayer(url: clip.url)
                 p.automaticallyWaitsToMinimizeStalling = false
                 player = p
                 p.play()
             }
-            .onDisappear { player?.pause() }
+            .onDisappear {
+                player?.pause()
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
             .confirmationDialog("Clip vom Server löschen?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Löschen", role: .destructive) {
                     onDelete()

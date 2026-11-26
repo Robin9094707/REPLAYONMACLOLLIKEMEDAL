@@ -183,7 +183,7 @@ struct DashboardView: View {
             Button("Clip-Ordner") { open { state.openClipFolder() } }
             Spacer()
             if let last = state.lastSavedClip {
-                Button("Letzter Clip") { open { NSWorkspace.shared.open(last) } }
+                Button("Letzter Clip") { open { ClipEditor.shared.open(last, game: "") } }
                 Spacer()
             }
             Button("Beenden") { state.confirmQuit() }
