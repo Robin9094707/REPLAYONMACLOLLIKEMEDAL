@@ -20,7 +20,7 @@ Verbindet **Simplex Suite (Mac)** und **Simplex Remote (iPhone)** von überall. 
    - **Port:** z. B. `8765`. Der Server liest auch die Umgebungsvariable `PORT`.
 4. Instanz starten. In der Konsole steht:
    ```
-   Simplex Relay 1.0.0
+   Simplex Relay 1.2.0
    Adresse:   http://0.0.0.0:8765   (WebSocket: /ws)
    Passwort:  Xy7…
    ```
@@ -53,7 +53,20 @@ Mit Caddy reicht: `remote.deine-domain.de { reverse_proxy 127.0.0.1:8765 }`
 
 **B) Direkt im Server:** In `simplex_relay.json` `tls_cert` und `tls_key` auf die Zertifikatsdateien setzen (z. B. `/etc/letsencrypt/live/<domain>/fullchain.pem` und `privkey.pem`).
 
-## Clips teilen (neu in 1.1)
+## Web-Galerie (neu in 1.2)
+
+Unter `https://remote.deine-domain.de/` läuft jetzt **Simplex Clips** – eine Web-App im Stil von Medal:
+
+- Anmelden mit dem Server-Passwort, danach alle Clips mit Vorschau beim Drüberfahren, Filter nach Spiel, Suche, Sortierung und Tages-Abschnitten.
+- **Theater-Ansicht** mit großem Player, Vollbild, ←/→ zum Wechseln, Umbenennen per Klick, Link kopieren, Download.
+- **Hochladen per Drag & Drop** direkt im Browser, Mehrfachauswahl zum Löschen.
+- **Live:** Neue oder gelöschte Clips erscheinen sofort (Server-Sent Events), ohne Neuladen.
+- **Überall gelöscht:** Löschst du einen Clip in der Web-App, am iPhone oder am Mac, verschwindet er überall – die Mac-App legt ihn in den Papierkorb. Der Server merkt sich gelöschte IDs 180 Tage (`clips/deleted.json`), ein neu aufgesetzter Server löscht also nie etwas auf dem Mac.
+- **Schneller Upload:** Gleiche Dateien erkennt der Server am SHA-256 und speichert sie nie doppelt, große Uploads werden in 1-MB-Blöcken direkt auf die Platte gestreamt.
+
+Die alte Statusseite liegt jetzt unter `/status`.
+
+## Clips teilen
 
 Die Mac-App kann Clips optional auf diesen Server hochladen. Jeder Clip bekommt einen Link wie `https://remote.deine-domain.de/c/Ab3xYz9KpQ`:
 
@@ -77,4 +90,4 @@ Geteilte Clips sind **nicht** Ende-zu-Ende verschlüsselt: Wer den Link kennt, k
 1. **Mac:** Simplex Suite → Einstellungen → **Remote** → Server-Adresse `https://remote.deine-domain.de` und Passwort eintragen → „Speichern & verbinden“.
 2. **iPhone:** Simplex Remote → **+** → QR-Code vom Mac scannen. Fertig.
 
-Im Browser zeigt `https://remote.deine-domain.de/` eine Statusseite, `…/health` antwortet mit `ok`.
+Im Browser zeigt `https://remote.deine-domain.de/` die Web-Galerie, `…/status` den Serverstatus, `…/health` antwortet mit `ok`.
