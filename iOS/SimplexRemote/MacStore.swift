@@ -176,6 +176,8 @@ final class RelayConnection: NSObject {
             for entry in json["macs"] as? [[String: Any]] ?? [] { handlePresence(entry) }
         case "presence":
             handlePresence(json)
+        case "clips":
+            NotificationCenter.default.post(name: .simplexClipsChanged, object: nil)
         case "error":
             emit(.failed(json["message"] as? String ?? "Serverfehler"))
             if json["code"] as? String == "auth" { shouldRun = false }

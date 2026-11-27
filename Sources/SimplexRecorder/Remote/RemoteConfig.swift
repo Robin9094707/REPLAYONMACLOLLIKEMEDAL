@@ -45,6 +45,8 @@ final class RemoteConfig: ObservableObject {
     @Published var uploadEnabled: Bool { didSet { d.set(uploadEnabled, forKey: "remote.uploadEnabled") } }
     @Published var autoUpload: Bool { didSet { d.set(autoUpload, forKey: "remote.autoUpload") } }
     @Published var copyLinkAfterUpload: Bool { didSet { d.set(copyLinkAfterUpload, forKey: "remote.copyLink") } }
+    /// Clips deleted on the server (web app, iPhone) are moved to the trash on the Mac too.
+    @Published var syncDeletions: Bool { didSet { d.set(syncDeletions, forKey: "remote.syncDeletions") } }
     @Published private(set) var macID: String
     @Published private(set) var keyData: Data
 
@@ -59,7 +61,14 @@ final class RemoteConfig: ObservableObject {
     private init() {
         let d = UserDefaults.standard
         d.register(defaults: ["remote.enabled": false, "remote.allowControl": true, "remote.allowUnlock": true,
-                              "remote.uploadEnabled": true, "remote.autoUpload": false, "remote.copyLink": true])
+                              "remote.uploadEnabled": true, "remote.autoUpload": true, "remote.copyLink": true,
+                              "remote.syncDeletions": true])
+        // Version 1.2: everything lives on the server by default – switch auto upload on once.
+        if !d.bool(forKey: "remote.autoUpload.v2") {
+            d.set(true, forKey: "remote.autoUpload")
+            d.set(true, forKey: "remote.autoUpload.v2")
+        }
+        syncDeletions = d.bool(forKey: "remote.syncDeletions")
         uploadEnabled = d.bool(forKey: "remote.uploadEnabled")
         autoUpload = d.bool(forKey: "remote.autoUpload")
         copyLinkAfterUpload = d.bool(forKey: "remote.copyLink")

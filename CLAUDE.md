@@ -29,7 +29,8 @@ Der Nutzer spricht **Deutsch**; alle UI-Texte sind Deutsch. Builds laufen aussch
 - Binärframes: `[kind u8][AES-GCM combined]`, kind 1 = Steuer-JSON, 2 = Video, 3 = Status. Server → iPhone zusätzlich `[kind][len][macID]…`.
 - Der Relay leitet iPhone-Befehle nur an den „attached“ Mac weiter → iPhone sendet vor jedem Befehl automatisch `attach`.
 - Videopaket: `[flags][seq u64][w u16][h u16]([sps][pps] bei Keyframe)[AVCC]`; iPhone sendet `{"t":"ack","seq":n}`.
-- Server 1.1: Clip-API (`/api/clips`, `/api/storage`, öffentliche `/c/{id}`, `/v/{id}.mp4`, `/t/{id}.jpg` mit OpenGraph für Discord). Konfiguration `simplex_relay.json` (password, max_storage_gb, public_url).
+- Server 1.2: Clip-API (`/api/clips`, `/api/clips/hash/{sha}`, `PATCH`/`DELETE /api/clips/{id}`, `POST /api/clips/delete`, `/api/events` SSE, `/api/storage`, öffentliche `/c/{id}`, `/v/{id}.mp4`, `/t/{id}.jpg` mit OpenGraph für Discord). Web-App unter `/` (HTML/CSS/JS als Strings in `relay.py`, Server bleibt eine Datei), Status unter `/status`. Konfiguration `simplex_relay.json` (password, max_storage_gb, public_url).
+- Clip-Sync: Server sendet bei Änderungen `{"type":"clips",…}` als Text-Frame an alle WebSockets; gelöschte IDs stehen 180 Tage in `deleted.json` und in `GET /api/clips` → `deleted`. Mac (`ClipUploader.sync`) legt nur Clips mit Tombstone in den Papierkorb; Auto-Upload ist standardmäßig an und lädt auch alte Clips nach (Warteschlange, 2 parallel, SHA-256-Duplikatprüfung).
 
 ## Build & Auslieferung
 - Workflow `.github/workflows/build.yml`: Jobs `mac` (macos-15-intel, `scripts/build_app.sh`, Universal-Binary, ad-hoc signiert), `ios` (wählt neuestes Xcode, XcodeGen, unsignierte IPA), `server` (Syntaxcheck). arm64-Runner hatten Kapazitätsprobleme → Intel-Runner.

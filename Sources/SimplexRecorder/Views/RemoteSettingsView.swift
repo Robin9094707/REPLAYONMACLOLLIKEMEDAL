@@ -110,10 +110,11 @@ struct RemoteSettingsView: View {
             }
 
             Section {
-                Toggle("Clips auf diesen Server hochladen können", isOn: $config.uploadEnabled)
+                Toggle("Clips auf diesen Server hochladen", isOn: $config.uploadEnabled)
                 if config.uploadEnabled {
-                    Toggle("Jeden neuen Clip automatisch hochladen", isOn: $config.autoUpload)
-                    Toggle("Danach Link in die Zwischenablage kopieren", isOn: $config.copyLinkAfterUpload)
+                    Toggle("Alle Clips automatisch auf dem Server speichern", isOn: $config.autoUpload)
+                    Toggle("Auf dem Server gelöschte Clips auch am Mac löschen", isOn: $config.syncDeletions)
+                    Toggle("Nach dem Hochladen Link in die Zwischenablage kopieren", isOn: $config.copyLinkAfterUpload)
                     if let storage = uploader.storage {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
@@ -127,11 +128,30 @@ struct RemoteSettingsView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    HStack {
+                        if let url = uploader.webAppURL {
+                            Button {
+                                NSWorkspace.shared.open(url)
+                            } label: {
+                                Label("Web-Galerie öffnen", systemImage: "safari")
+                            }
+                        }
+                        Button {
+                            Task { await uploader.sync() }
+                        } label: {
+                            Label("Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(uploader.syncing)
+                        Spacer()
+                        if !uploader.queued.isEmpty {
+                            Text("\(uploader.queued.count) in der Warteschlange").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             } header: {
-                Text("Clips teilen")
+                Text("Clips & Server")
             } footer: {
-                Text("Hochgeladene Clips bekommen einen Link, den jeder im Browser ohne Anmeldung abspielen kann – Discord & Co. zeigen ihn direkt als Video. HEVC-Clips werden dafür automatisch in H.264 umgewandelt. Geteilte Clips sind nicht Ende-zu-Ende verschlüsselt. Verwalten und löschen kannst du sie in der iPhone-App.")
+                Text("Jeder Clip landet automatisch auf deinem Server und bekommt einen Link, den jeder im Browser ohne Anmeldung abspielen kann – Discord & Co. zeigen ihn direkt als Video. Gleiche Dateien werden nie doppelt hochgeladen, HEVC-Clips automatisch in H.264 umgewandelt. Löschst du einen Clip in der Web-Galerie, am iPhone oder hier, verschwindet er überall (am Mac landet er im Papierkorb). Geteilte Clips sind nicht Ende-zu-Ende verschlüsselt.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .task { await uploader.refreshStorage() }

@@ -107,6 +107,7 @@ final class AppState: ObservableObject {
         scheduleReevaluate()
         SuiteCoordinator.shared.start()
         RemoteAgent.shared.start()
+        ClipUploader.shared.start()
     }
 
     /// After an update the old privacy entry belongs to the previous (differently signed)

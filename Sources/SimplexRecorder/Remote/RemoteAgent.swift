@@ -220,6 +220,9 @@ final class RemoteAgent: ObservableObject {
             rescheduleStatus()
             updateClipboardWatch()
             sendStatus()
+        case "clips":
+            // A clip was added/deleted on the server (web app, iPhone) → mirror it here.
+            Task { await ClipUploader.shared.sync() }
         case "error":
             let message = json["message"] as? String ?? "Fehler"
             state = .error(message)
