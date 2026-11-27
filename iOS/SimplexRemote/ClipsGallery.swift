@@ -214,6 +214,7 @@ final class ClipsStore: ObservableObject {
 
 // MARK: - Shared actions
 
+@MainActor
 enum ClipActions {
     /// Downloads the clip and stores it in the photo library.
     static func saveToPhotos(_ clip: ServerClip) async -> String {
@@ -665,7 +666,7 @@ struct ClipViewer: View {
     }
 
     private var current: ServerClip? { clips.first { $0.id == currentID } }
-    private var dismissProgress: Double { min(1, abs(dragOffset.height) / 300) }
+    private var dismissProgress: Double { min(1.0, Double(abs(dragOffset.height)) / 300.0) }
 
     var body: some View {
         ZStack {

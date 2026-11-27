@@ -65,11 +65,12 @@ jobs:
       - name: Projekt erzeugen & bauen
         working-directory: iOS
         run: |
+          set -o pipefail
           xcodegen generate
           xcodebuild -project SimplexRemote.xcodeproj -target SimplexRemote -configuration Release \
             -sdk iphoneos CURRENT_PROJECT_VERSION=${BUILD_NUMBER} \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -n 60
-          test -d build/Release-iphoneos/SimplexRemote.app
+          test -f build/Release-iphoneos/SimplexRemote.app/SimplexRemote
 
       - name: IPA packen
         working-directory: iOS
@@ -78,6 +79,7 @@ jobs:
           cp -R build/Release-iphoneos/SimplexRemote.app Payload/
           zip -qry ../SimplexRemote.ipa Payload
           ls -lh ../SimplexRemote.ipa
+          test "$(stat -f%z ../SimplexRemote.ipa)" -gt 100000
 
       - uses: actions/upload-artifact@v4
         with:
